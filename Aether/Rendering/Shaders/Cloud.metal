@@ -38,6 +38,29 @@ static inline float remap(float v, float l0, float h0, float l1, float h1) {
     return l1 + (v - l0) * (h1 - l1) / (h0 - l0);
 }
 
+// Henyey-Greenstein phase function (normalized by 1/4π). g > 0 = forward
+// scattering, g < 0 = backward.
+static inline float henyeyGreenstein(float cosTheta, float g) {
+    float g2 = g * g;
+    float denom = 1.0f + g2 - 2.0f * g * cosTheta;
+    return (1.0f - g2) / (4.0f * M_PI_F * pow(max(denom, 1.0e-4f), 1.5f));
+}
+
+// Dual-lobe phase: a strong forward lobe (dusk "silver lining" when looking
+// toward the sun) blended with a softer backward lobe for ambient fill.
+// `gScale` softens the anisotropy for the higher multiple-scattering octaves.
+static inline float dualPhase(float cosTheta, float gScale) {
+    float forward = henyeyGreenstein(cosTheta, 0.82f * gScale);
+    float backward = henyeyGreenstein(cosTheta, -0.18f * gScale);
+    return mix(backward, forward, 0.55f);
+}
+
+// Schneider's "powder" approximation: darkens low-density regions facing the
+// light, recovering the dark edges of sunlit clouds.
+static inline float powder(float density) {
+    return 1.0f - exp(-density * 3.0f);
+}
+
 // Density at world point `p`: painted shape from `shape`, detailed by `noise`.
 static inline float cloudDensity(float3 p, float time,
                                  texture3d<float> shape, texture3d<float> noise,
@@ -64,16 +87,17 @@ static inline float cloudDensity(float3 p, float time,
     return saturate(density);
 }
 
-// Beer-Lambert transmittance toward the sun (self-shadowing).
-static inline float lightTransmittance(float3 p, float3 sunDir, float time,
-                                       texture3d<float> shape, texture3d<float> noise,
-                                       float3 boxMin, float3 boxSize) {
+// Accumulated density toward the sun (optical depth before extinction), used by
+// the multiple-scattering octaves below.
+static inline float lightOpticalDepth(float3 p, float3 sunDir, float time,
+                                      texture3d<float> shape, texture3d<float> noise,
+                                      float3 boxMin, float3 boxSize) {
     float opticalDepth = 0.0f;
     for (int i = 0; i < kLightSteps; ++i) {
         float3 q = p + sunDir * (float(i) + 0.5f) * kLightStep;
         opticalDepth += cloudDensity(q, time, shape, noise, boxMin, boxSize) * kLightStep;
     }
-    return exp(-opticalDepth * kSigma);
+    return opticalDepth;
 }
 
 // Slab-method ray/AABB intersection. Returns near/far t in .xy.
@@ -125,8 +149,13 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
 
     float stepSize = (tFar - tNear) / float(kViewSteps);
     float3 sunDir = normalize(u.sunDirection.xyz);
-    const float3 sunColor = float3(1.45f, 1.05f, 0.78f);   // warm dusk light
-    const float3 skyAmbient = float3(0.26f, 0.32f, 0.46f); // cool sky fill
+
+    // Bright warm sun (compensates the 1/4π phase normalization) + cool sky fill.
+    const float3 sunColor = float3(6.5f, 4.7f, 3.4f);
+    const float3 skyAmbient = float3(0.34f, 0.40f, 0.55f);
+    const int kScatterOctaves = 3;
+
+    float cosTheta = dot(rd, sunDir);
 
     float transmittance = 1.0f;
     float3 scattered = float3(0.0f);
@@ -137,9 +166,25 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
 
         float density = cloudDensity(p, u.time, shape, noise, boxMin, boxSize);
         if (density > 0.001f) {
-            float light = lightTransmittance(p, sunDir, u.time, shape, noise, boxMin, boxSize);
-            float3 luminance = sunColor * light + skyAmbient;
+            float opticalDepth = lightOpticalDepth(p, sunDir, u.time, shape, noise, boxMin, boxSize);
 
+            // Multiple-scattering approximation (Hillaire / Wrenninge octaves):
+            // each octave lets light penetrate deeper (lower extinction) with a
+            // smaller, more isotropic contribution — so backlit clouds glow.
+            float3 sunLight = float3(0.0f);
+            float attenuation = 1.0f;
+            float weight = 1.0f;
+            float gScale = 1.0f;
+            for (int o = 0; o < kScatterOctaves; ++o) {
+                float beer = exp(-opticalDepth * kSigma * attenuation);
+                sunLight += weight * beer * dualPhase(cosTheta, gScale);
+                attenuation *= 0.5f;
+                weight *= 0.55f;
+                gScale *= 0.5f;
+            }
+            sunLight *= sunColor * powder(density);
+
+            float3 luminance = sunLight + skyAmbient;
             float extinction = density * kSigma * stepSize;
             // In-scattered radiance integrated against current transmittance.
             scattered += transmittance * luminance * extinction;

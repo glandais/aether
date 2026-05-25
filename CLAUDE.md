@@ -164,7 +164,17 @@ Simplifications connues : repeinte intégrale du volume à chaque trait (pas
 d'incrémental) ; pinceau rond en coords normalisées (légèrement elliptique à
 l'écran).
 
-**Prochaine cible — étape 5 :** scattering atmosphérique — Beer-Lambert +
-fonction de phase Henyey-Greenstein (double-lobe) + effet *powder*, en
-remplacement de l'éclairage directionnel simple. Chaque étape doit rester
-visuellement vérifiable avant la suivante.
+**Étape 5 (scattering atmosphérique) — terminée.**
+- [x] Fonction de phase Henyey-Greenstein double-lobe (avant + arrière) selon
+  l'angle vue/soleil → frange argentée en contre-jour
+- [x] Effet *powder* (Schneider) : assombrissement des bords fins éclairés
+- [x] Approximation multi-scattering par octaves (Hillaire / Wrenninge) : la
+  lumière pénètre plus profond → nuages en contre-jour qui *rayonnent*
+- [x] Soleil bas en contre-jour pour l'ambiance crépusculaire
+- [x] Vérifiée visuellement sur simulateur (iPhone 17 Pro)
+
+Référence : Hillaire 2016, Patapom, Wallis, Scratchapixel (voir `BIBLIO.md`).
+
+**Prochaine cible — étape 6 :** composition avec la depth map du paysage —
+occlusion correcte des nuages passant derrière les reliefs. Chaque étape doit
+rester visuellement vérifiable avant la suivante.

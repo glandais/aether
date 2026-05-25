@@ -148,8 +148,9 @@ final class Renderer: NSObject, MTKViewDelegate {
             resolution: SIMD2(width, height),
             time: Float(CACurrentMediaTime() - startTime),
             aspect: aspect,
-            // Soleil bas et chaud, cohérent avec l'horizon du paysage.
-            sunDirection: SIMD4(0.55, 0.35, 0.20, 0.0),
+            // Soleil bas, chaud, et en partie derrière le nuage (contre-jour)
+            // pour la frange argentée du crépuscule.
+            sunDirection: SIMD4(0.40, 0.12, -0.50, 0.0),
             // Volume cadré sur le frustum visible à la profondeur z = -5.
             volumeCenter: SIMD4(0.0, 0.0, -5.0, 0.0),
             volumeHalfSize: SIMD4(2.5 * aspect, 2.5, 0.9, 0.0)
