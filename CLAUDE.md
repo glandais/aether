@@ -269,11 +269,27 @@ tests.
 - Tests : EXIF GPS/horodatage, décalage UTC, FOV orientation/zoom, cap +
   tangage + roulis du soleil, attitude depuis de vrais `AccelerationVector`.
 
+## WeatherKit source primaire — **terminé**
+
+- `WeatherService` renvoie un `WeatherReport` (snapshot + `WeatherAttribution`).
+- `WeatherKitWeatherService` (Services) : source primaire via WeatherKit
+  (entitlement `com.apple.developer.weatherkit`) ; toute erreur ou date hors
+  fenêtre → `throw`. `WeatherKit.WeatherService` est qualifié pour éviter la
+  collision avec notre protocole `WeatherService`.
+- `FallbackWeatherService` : cascade `[WeatherKit, Open-Meteo]`, premier succès,
+  log des bascules (`Logger`, catégorie `weather`).
+- `CanvasView` affiche l'attribution de la source réellement utilisée (logo
+  WeatherKit + lien légal, ou crédit Open-Meteo) en bas à droite, registre sobre.
+- **Prérequis portail** : l'App ID `io.github.glandais.aether` doit avoir le
+  service **WeatherKit** activé dans Apple Developer (propagation ~30 min). Avant
+  cela, l'appel live échoue → fallback Open-Meteo silencieux.
+- Tests : `FallbackWeatherServiceTests` (cascade), `WeatherKitMappingTests`
+  (condition → Domain). L'appel WeatherKit live est vérifié manuellement.
+
 ## Reste à faire
 
 - **Réglages** (`Features/Settings`) : ajuster lieu/heure (les photos les
   tirent de l'EXIF ; les paysages curés ont des presets).
-- **WeatherKit** comme source primaire (entitlement requis) derrière `WeatherService`.
 - **LiDAR / ARKit** comme source de profondeur alternative derrière `DepthService`.
 - **Éclairage lunaire** nocturne (palette froide) quand le Soleil est sous l'horizon.
 - **Profilage perf sur device réel** (étape 7 vérifiée structurellement seulement).
