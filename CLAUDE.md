@@ -108,5 +108,17 @@ crash reporting.
 
 ## État d'avancement
 
-**Étape 0 (bootstrap) — en cours.** Prochaine cible : étape 1 du pipeline (MVP
-scaffold `MTKView` plein écran + clear color).
+**Étape 0 (bootstrap) — terminée.** Projet XcodeGen, structure en couches,
+modèles Domain, protocoles Services, app SwiftUI lançable, test de fumée,
+signature équipe. Build + test verts.
+
+**Étape 1 (MVP scaffold) — scaffold en place, à finaliser.**
+- [x] `MTKView` plein écran rendant un clear color (bleu crépusculaire)
+- [x] `Passthrough.metal` (triangle plein écran) prêt, non encore câblé
+- [ ] Paysage affiché en texture de fond
+- [ ] Quad de test dessiné par-dessus (câbler `Passthrough.metal` dans le `Renderer`)
+
+**Prochaine cible : finir l'étape 1** (texture de fond + quad), puis **étape 2** :
+raymarching d'un seul nuage analytique (sphère de bruit) avec éclairage
+directionnel fixe. Chaque étape doit rester visuellement vérifiable avant la
+suivante.
