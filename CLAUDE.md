@@ -115,13 +115,15 @@ crash reporting.
 modèles Domain, protocoles Services, app SwiftUI lançable, test de fumée,
 signature équipe. Build + test verts.
 
-**Étape 1 (MVP scaffold) — scaffold en place, à finaliser.**
-- [x] `MTKView` plein écran rendant un clear color (bleu crépusculaire)
-- [x] `Passthrough.metal` (triangle plein écran) prêt, non encore câblé
-- [ ] Paysage affiché en texture de fond
-- [ ] Quad de test dessiné par-dessus (câbler `Passthrough.metal` dans le `Renderer`)
+**Étape 1 (MVP scaffold) — terminée.**
+- [x] Paysage placeholder rendu en texture de fond plein écran
+  (`Background.metal`, dégradé crépusculaire généré dans `Renderer`)
+- [x] Quad de test composité par-dessus en alpha blending (`TestQuad.metal`)
+- [x] Vérifiée visuellement sur simulateur (iPhone 17 Pro)
 
-**Prochaine cible : finir l'étape 1** (texture de fond + quad), puis **étape 2** :
-raymarching d'un seul nuage analytique (sphère de bruit) avec éclairage
-directionnel fixe. Chaque étape doit rester visuellement vérifiable avant la
-suivante.
+Le paysage est un dégradé placeholder ; la galerie curée / l'import photo
+viendront alimenter `landscapeTexture`.
+
+**Prochaine cible — étape 2 :** raymarching d'un seul nuage analytique (sphère
+de bruit) avec éclairage directionnel fixe, à la place du quad de test. Chaque
+étape doit rester visuellement vérifiable avant la suivante.
