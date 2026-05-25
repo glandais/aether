@@ -10,4 +10,7 @@ struct SceneContext: Identifiable {
     var scene: Scene
     var landscape: CGImage
     var depthMap: DepthMap?
+    /// Aspect (largeur/hauteur) auquel afficher le paysage sans déformation
+    /// (lettrage). `nil` = plein cadre (paysages curés procéduraux abstraits).
+    var displayAspect: CGFloat?
 }

@@ -46,6 +46,19 @@ struct PhotoImporterTests {
         #expect(metadata.date == nil)
     }
 
+    @Test("Le FOV vertical dépend de l'orientation et du zoom")
+    func fieldOfViewByOrientationAndZoom() {
+        let focal = 26.0  // grand-angle typique de téléphone
+        let landscape = PhotoImporter.verticalFieldOfView(focalLength35: focal, aspect: 3.0 / 2.0)
+        let portrait = PhotoImporter.verticalFieldOfView(focalLength35: focal, aspect: 2.0 / 3.0)
+        let telephoto = PhotoImporter.verticalFieldOfView(focalLength35: 77.0, aspect: 3.0 / 2.0)
+
+        // En portrait, l'axe vertical utilise le grand côté du capteur → FOV plus large.
+        #expect(portrait > landscape)
+        // Plus longue focale (téléobjectif) → FOV plus étroit.
+        #expect(telephoto < landscape)
+    }
+
     // MARK: - Fabrique d'images de test
 
     private static func properties(of data: Data) -> [CFString: Any] {

@@ -2,9 +2,10 @@ import Foundation
 import SwiftUI
 import simd
 
-/// Hôte plein écran du canvas de rendu volumétrique, pour un paysage donné.
-/// L'utilisateur peint des silhouettes de nuages au doigt ; le `Renderer` en
-/// fait un volume de densité, éclairé selon le lieu/instant de la scène.
+/// Hôte du canvas de rendu volumétrique, pour un paysage donné. La photo est
+/// affichée à son propre aspect (lettrage) pour éviter toute déformation ; les
+/// paysages curés abstraits occupent le plein cadre. L'utilisateur peint des
+/// silhouettes de nuages, éclairées selon le lieu/instant/cadrage de la scène.
 struct CanvasView: View {
     let context: SceneContext
 
@@ -13,18 +14,10 @@ struct CanvasView: View {
     private let astro = SwiftAAAstroService()
     private let weather = OpenMeteoWeatherService()
 
-    /// Direction du soleil résolue depuis l'`AstroService`, exprimée
-    /// relativement au cap de la caméra (une photo prise vers le Sud place le
-    /// soleil à l'opposé d'une photo prise vers le Nord).
+    /// Direction du soleil dans le repère caméra : cap (Nord vs Sud) + tangage.
     private var sunDirection: SIMD3<Float> {
-        let position = astro.position(
-            of: .sun, at: context.scene.coordinate, date: context.scene.date)
-        let cameraRelative = CelestialPosition(
-            body: .sun,
-            azimuth: position.azimuth - context.scene.heading,
-            altitude: position.altitude
-        )
-        return cameraRelative.worldDirection
+        astro.position(of: .sun, at: context.scene.coordinate, date: context.scene.date)
+            .cameraDirection(heading: context.scene.heading, pitch: context.scene.pitch)
     }
 
     /// tan(FOV/2) vertical : cale la projection du ciel sur le zoom de la photo.
@@ -33,32 +26,48 @@ struct CanvasView: View {
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .bottom) {
-                MetalView(
-                    strokes: model.strokes,
-                    sunDirection: sunDirection,
-                    cloudParameters: cloudParameters,
-                    cameraTanHalfFov: tanHalfFieldOfView,
-                    landscape: context.landscape,
-                    depthMap: context.depthMap,
-                    contentID: context.id
-                )
-                .contentShape(Rectangle())
-                .gesture(paintGesture(in: geometry.size))
-
-                if !model.strokes.isEmpty {
-                    clearButton
-                        .padding(.bottom, 32)
+        ZStack {
+            Color.black.ignoresSafeArea()
+            canvas
+            if !model.strokes.isEmpty {
+                VStack {
+                    Spacer()
+                    clearButton.padding(.bottom, 32)
                 }
             }
         }
-        .ignoresSafeArea()
         .task(id: context.id) { await loadWeather() }
     }
 
-    /// Récupère la météo réelle pour la scène ; en cas d'échec, on conserve des
-    /// paramètres neutres.
+    @ViewBuilder
+    private var canvas: some View {
+        let metalView = MetalView(
+            strokes: model.strokes,
+            sunDirection: sunDirection,
+            cloudParameters: cloudParameters,
+            cameraTanHalfFov: tanHalfFieldOfView,
+            landscape: context.landscape,
+            depthMap: context.depthMap,
+            contentID: context.id
+        )
+        .overlay {
+            // GeometryReader interne : taille réelle du rendu (cadre lettré ou
+            // plein écran) pour normaliser les coordonnées du pinceau.
+            GeometryReader { geometry in
+                Color.clear
+                    .contentShape(Rectangle())
+                    .gesture(paintGesture(in: geometry.size))
+            }
+        }
+
+        if let aspect = context.displayAspect {
+            metalView.aspectRatio(aspect, contentMode: .fit)
+        } else {
+            metalView.ignoresSafeArea()
+        }
+    }
+
+    /// Récupère la météo réelle pour la scène ; en cas d'échec, paramètres neutres.
     private func loadWeather() async {
         do {
             let snapshot = try await weather.snapshot(

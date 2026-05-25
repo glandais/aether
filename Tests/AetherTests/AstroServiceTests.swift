@@ -83,4 +83,23 @@ struct AstroServiceTests {
         #expect(abs(eastDir.y) < 1e-5)
         #expect(abs(eastDir.z) < 1e-5)
     }
+
+    @Test("Le cap caméra réoriente le soleil (face Est ⇒ soleil au Sud à droite)")
+    func cameraHeadingRotatesSun() {
+        // Soleil plein Sud ; caméra orientée vers l'Est → le Sud est à droite.
+        let sun = CelestialPosition(body: .sun, azimuth: .pi, altitude: .pi / 6)
+        let direction = sun.cameraDirection(heading: .pi / 2, pitch: 0)
+        #expect(direction.x > 0.8)
+    }
+
+    @Test("Le tangage incline le soleil dans le repère caméra")
+    func cameraPitchTiltsSun() {
+        // Soleil droit devant à l'horizon ; viser vers le haut le fait passer
+        // sous le centre de l'image.
+        let sun = CelestialPosition(body: .sun, azimuth: 0, altitude: 0)
+        let level = sun.cameraDirection(heading: 0, pitch: 0)
+        let tiltedUp = sun.cameraDirection(heading: 0, pitch: .pi / 6)
+        #expect(abs(level.y) < 1e-5)
+        #expect(tiltedUp.y < -0.4)
+    }
 }

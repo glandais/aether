@@ -17,8 +17,9 @@ struct PhotoImporter {
         var date: Date?
         /// Cap de prise de vue (radians, 0 = Nord), si `GPSImgDirection` présent.
         var heading: Double?
-        /// FOV vertical (radians), dérivé de la focale 35 mm si présente.
-        var fieldOfView: Double?
+        /// Focale 35 mm équivalente (mm), si présente. Le FOV en découle, mais
+        /// dépend de l'orientation de la photo (calculé dans `makeContext`).
+        var focalLength35: Double?
     }
 
     private let depthService: DepthService
@@ -38,16 +39,33 @@ struct PhotoImporter {
         let oriented = Self.orientedImage(decoded, properties: properties) ?? decoded
         let metadata = Self.parseMetadata(properties)
 
+        // FOV vertical selon l'orientation effective de la photo (après EXIF).
+        let aspect = Double(oriented.width) / Double(max(oriented.height, 1))
+        let fieldOfView = metadata.focalLength35.map {
+            Self.verticalFieldOfView(focalLength35: $0, aspect: aspect)
+        } ?? Scene.defaultFieldOfView
+
         let scene = Scene(
             title: "Photo",
             coordinate: metadata.coordinate ?? fallbackCoordinate,
             date: metadata.date ?? Date(),
             heading: metadata.heading ?? 0,
-            fieldOfView: metadata.fieldOfView ?? Scene.defaultFieldOfView
+            fieldOfView: fieldOfView
         )
         // La profondeur est optionnelle : sans elle, pas d'occlusion par le relief.
         let depthMap = try? await depthService.estimateDepth(for: oriented)
-        return SceneContext(scene: scene, landscape: oriented, depthMap: depthMap)
+        return SceneContext(
+            scene: scene, landscape: oriented, depthMap: depthMap,
+            displayAspect: CGFloat(aspect))
+    }
+
+    /// FOV vertical depuis la focale 35 mm. Le cadre 24×36 a 36 mm sur son grand
+    /// axe : en paysage la verticale = 24 mm (demi 12), en portrait = 36 mm
+    /// (demi 18). Approximation suffisante pour caler l'échelle du ciel.
+    static func verticalFieldOfView(focalLength35: Double, aspect: Double) -> Double {
+        guard focalLength35 > 0 else { return Scene.defaultFieldOfView }
+        let halfSensor = aspect >= 1 ? 12.0 : 18.0
+        return 2.0 * atan(halfSensor / focalLength35)
     }
 
     // MARK: - EXIF (pur, testable)
@@ -62,7 +80,7 @@ struct PhotoImporter {
             coordinate: coordinate,
             date: date,
             heading: heading(properties),
-            fieldOfView: fieldOfView(properties)
+            focalLength35: focalLength35(properties)
         )
     }
 
@@ -75,16 +93,14 @@ struct PhotoImporter {
         return direction * .pi / 180.0
     }
 
-    /// FOV vertical depuis la focale 35 mm équivalente : 2·atan(12 / f), où 12
-    /// est la demi-hauteur du cadre 24×36. Approximation (ignore l'orientation
-    /// exacte du capteur), suffisante pour caler l'échelle du ciel.
-    private static func fieldOfView(_ properties: [CFString: Any]) -> Double? {
+    /// Focale 35 mm équivalente depuis l'EXIF.
+    private static func focalLength35(_ properties: [CFString: Any]) -> Double? {
         guard let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any],
               let focal35 = exif[kCGImagePropertyExifFocalLenIn35mmFilm] as? Double,
               focal35 > 0 else {
             return nil
         }
-        return 2.0 * atan(12.0 / focal35)
+        return focal35
     }
 
     private static func gpsCoordinate(_ properties: [CFString: Any]) -> GeoCoordinate? {

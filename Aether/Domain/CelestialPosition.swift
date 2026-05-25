@@ -28,4 +28,22 @@ extension CelestialPosition {
         let up = sin(altitudeRad)
         return SIMD3(east, up, -north)
     }
+
+    /// Direction vers l'astre dans le repère de la caméra de la scène, en
+    /// tenant compte du cap (yaw) et du tangage (pitch). L'azimut est ramené
+    /// relativement à l'avant de la caméra (− `heading`), puis la direction est
+    /// inclinée de −`pitch` autour de l'axe droit (X) de la caméra.
+    func cameraDirection(heading: Double, pitch: Double) -> SIMD3<Float> {
+        let relative = CelestialPosition(body: body, azimuth: azimuth - heading, altitude: altitude)
+        let base = relative.worldDirection
+
+        let angle = Float(-pitch)
+        let cosP = cos(angle)
+        let sinP = sin(angle)
+        return SIMD3(
+            base.x,
+            base.y * cosP - base.z * sinP,
+            base.y * sinP + base.z * cosP
+        )
+    }
 }

@@ -13,7 +13,10 @@ struct CuratedLandscape: Identifiable {
     func makeContext() -> SceneContext? {
         guard let image = LandscapeFactory.image(palette: palette) else { return nil }
         let scene = Scene(title: title, coordinate: coordinate, date: date)
-        return SceneContext(scene: scene, landscape: image, depthMap: LandscapeFactory.depthMap())
+        // Paysages curés abstraits : plein cadre (displayAspect nil).
+        return SceneContext(
+            scene: scene, landscape: image,
+            depthMap: LandscapeFactory.depthMap(), displayAspect: nil)
     }
 }
 

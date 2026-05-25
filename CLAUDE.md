@@ -251,19 +251,22 @@ tests.
 - **Profondeur réelle** : `CoreMLDepthService` (acteur) exécute Depth Anything V2
   Small F16 (`Resources/Models/`, Apache-2.0) → `DepthMap` Domain ; mappée en
   masque d'occlusion tolérant (BIBLIO §4) dans `setDepthMap`.
-- **Caméra calée sur la photo** : le cap EXIF (`GPSImgDirection`) oriente le
-  soleil relativement à la scène ; le FOV (focale 35 mm équiv.) pilote
-  l'écartement des rayons et le cadrage du volume.
-- Tests : extraction EXIF GPS/horodatage (`PhotoImporterTests`).
+- **Caméra calée sur la photo** : la caméra virtuelle reproduit la vraie.
+  - *Cap* (`GPSImgDirection`) → oriente le soleil relativement à la scène
+    (`CelestialPosition.cameraDirection`, Nord vs Sud).
+  - *Zoom* (focale 35 mm) → FOV vertical pilotant rayons + cadrage du volume.
+  - *Orientation / aspect* : la photo est affichée **aspect-fit** (lettrage,
+    `CanvasView`) à son ratio réel — aucune déformation paysage/portrait ; le
+    FOV vertical dépend de l'orientation (24 mm vs 36 mm). Paysages curés =
+    plein cadre (`displayAspect` nil).
+  - *Tangage* (`Scene.pitch`) → incline la direction du soleil dans le repère
+    caméra. Pas de source EXIF fiable → 0 par défaut.
+- Tests : EXIF GPS/horodatage, FOV par orientation/zoom, cap + tangage du soleil.
 
 ## Reste à faire
 
-- **Orientation / aspect** : la photo est *étirée* plein écran (portrait). Un
-  cliché paysage est donc déformé, et le FOV vertical est calculé sans tenir
-  compte de l'orientation du capteur. À faire : affichage *aspect-fit*
-  (letterbox) + FOV par axe selon paysage/portrait + tangage (pitch) caméra.
-  C'est un chantier *layout* couplé (la caméra du nuage doit partager le même
-  sous-rectangle que la photo) — prochaine étape dédiée.
+- **Source du tangage** : `Scene.pitch` est câblé mais sans source (EXIF stills
+  ne le donne pas) → contrôle manuel ou attitude ARKit à brancher.
 - **Réglages** (`Features/Settings`) : ajuster lieu/heure (les photos les
   tirent de l'EXIF ; les paysages curés ont des presets).
 - **WeatherKit** comme source primaire (entitlement requis) derrière `WeatherService`.
