@@ -15,6 +15,10 @@ struct CanvasView: View {
         date: makeDefaultDate()
     )
     private let astro = SwiftAAAstroService()
+    private let weather = OpenMeteoWeatherService()
+
+    /// Paramètres de nuage dérivés de la météo réelle (résolus en tâche async).
+    @State private var cloudParameters = CloudParameters.neutral
 
     /// Direction du soleil résolue depuis l'`AstroService` pour la scène.
     private var sunDirection: SIMD3<Float> {
@@ -25,9 +29,13 @@ struct CanvasView: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .bottom) {
-                MetalView(strokes: model.strokes, sunDirection: sunDirection)
-                    .contentShape(Rectangle())
-                    .gesture(paintGesture(in: geometry.size))
+                MetalView(
+                    strokes: model.strokes,
+                    sunDirection: sunDirection,
+                    cloudParameters: cloudParameters
+                )
+                .contentShape(Rectangle())
+                .gesture(paintGesture(in: geometry.size))
 
                 if !model.strokes.isEmpty {
                     clearButton
@@ -36,6 +44,19 @@ struct CanvasView: View {
             }
         }
         .ignoresSafeArea()
+        .task { await loadWeather() }
+    }
+
+    /// Récupère la météo réelle pour la scène ; en cas d'échec (réseau,
+    /// indisponibilité), on conserve des paramètres neutres.
+    private func loadWeather() async {
+        do {
+            let snapshot = try await weather.snapshot(
+                at: Self.defaultScene.coordinate, date: Self.defaultScene.date)
+            cloudParameters = CloudParameters(weather: snapshot)
+        } catch {
+            cloudParameters = .neutral
+        }
     }
 
     private func paintGesture(in size: CGSize) -> some Gesture {

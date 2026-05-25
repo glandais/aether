@@ -17,6 +17,7 @@ struct CloudUniforms {
     float4 sunDirection;    // xyz: normalized direction TOWARD the sun
     float4 volumeCenter;    // xyz: world-space center of the density volume
     float4 volumeHalfSize;  // xyz: world-space half-extents of the volume AABB
+    float4 weather;         // x: coverage bias, y: density scale (from weather)
 };
 
 // Temporal amortization (step 7): each frame raymarches only the half-res
@@ -70,14 +71,15 @@ static inline float powder(float density) {
 }
 
 // Density at world point `p`: painted shape from `shape`, detailed by `noise`.
-static inline float cloudDensity(float3 p, float time,
+// `coverageBias` (from the weather) fills out or erodes the painted silhouette.
+static inline float cloudDensity(float3 p, float time, float coverageBias,
                                  texture3d<float> shape, texture3d<float> noise,
                                  float3 boxMin, float3 boxSize) {
     float3 uvw = (p - boxMin) / boxSize;
     if (any(uvw < 0.0f) || any(uvw > 1.0f)) {
         return 0.0f;
     }
-    float painted = shape.sample(shapeSampler, uvw).r;
+    float painted = saturate(shape.sample(shapeSampler, uvw).r + coverageBias);
     if (painted <= 0.001f) {
         return 0.0f;
     }
@@ -97,13 +99,13 @@ static inline float cloudDensity(float3 p, float time,
 
 // Accumulated density toward the sun (optical depth before extinction), used by
 // the multiple-scattering octaves below.
-static inline float lightOpticalDepth(float3 p, float3 sunDir, float time,
+static inline float lightOpticalDepth(float3 p, float3 sunDir, float time, float coverageBias,
                                       texture3d<float> shape, texture3d<float> noise,
                                       float3 boxMin, float3 boxSize) {
     float opticalDepth = 0.0f;
     for (int i = 0; i < kLightSteps; ++i) {
         float3 q = p + sunDir * (float(i) + 0.5f) * kLightStep;
-        opticalDepth += cloudDensity(q, time, shape, noise, boxMin, boxSize) * kLightStep;
+        opticalDepth += cloudDensity(q, time, coverageBias, shape, noise, boxMin, boxSize) * kLightStep;
     }
     return opticalDepth;
 }
@@ -184,6 +186,10 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
 
     float cosTheta = dot(rd, sunDir);
 
+    // Météo (étape 9) : biais de couverture sur la silhouette + échelle d'opacité.
+    float coverageBias = u.weather.x;
+    float sigma = kSigma * u.weather.y;
+
     float transmittance = 1.0f;
     float3 scattered = float3(0.0f);
 
@@ -191,12 +197,12 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
         float t = tNear + (float(i) + 0.5f) * stepSize;
         float3 p = ro + rd * t;
 
-        float density = cloudDensity(p, u.time, shape, noise, boxMin, boxSize);
+        float density = cloudDensity(p, u.time, coverageBias, shape, noise, boxMin, boxSize);
         // Soft particles: fade the cloud as it approaches the relief, avoiding a
         // hard intersection edge (depth maps are imprecise — see BIBLIO §4).
         density *= smoothstep(0.0f, kSoftDepth, sceneT - t);
         if (density > 0.001f) {
-            float opticalDepth = lightOpticalDepth(p, sunDir, u.time, shape, noise, boxMin, boxSize);
+            float opticalDepth = lightOpticalDepth(p, sunDir, u.time, coverageBias, shape, noise, boxMin, boxSize);
 
             // Multiple-scattering approximation (Hillaire / Wrenninge octaves):
             // each octave lets light penetrate deeper (lower extinction) with a
@@ -206,7 +212,7 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
             float weight = 1.0f;
             float gScale = 1.0f;
             for (int o = 0; o < kScatterOctaves; ++o) {
-                float beer = exp(-opticalDepth * kSigma * attenuation);
+                float beer = exp(-opticalDepth * sigma * attenuation);
                 sunLight += weight * beer * dualPhase(cosTheta, gScale);
                 attenuation *= 0.5f;
                 weight *= 0.55f;
@@ -215,7 +221,7 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
             sunLight *= sunColor * powder(density);
 
             float3 luminance = sunLight + skyAmbient;
-            float extinction = density * kSigma * stepSize;
+            float extinction = density * sigma * stepSize;
             // In-scattered radiance integrated against current transmittance.
             scattered += transmittance * luminance * extinction;
             transmittance *= exp(-extinction);

@@ -12,6 +12,7 @@ private struct CloudUniforms {
     var sunDirection: SIMD4<Float>
     var volumeCenter: SIMD4<Float>
     var volumeHalfSize: SIMD4<Float>
+    var weather: SIMD4<Float>
 }
 
 /// Un « dab » de pinceau envoyé au compute shader. Doit correspondre à `Dab`
@@ -58,6 +59,10 @@ final class Renderer: NSObject, MTKViewDelegate {
     // Direction du soleil (vers l'astre), résolue par la Feature depuis
     // l'`AstroService` (étape 8). Valeur de repli avant la première mise à jour.
     private var sunDirection = SIMD3<Float>(0.40, 0.12, -0.50)
+
+    // Paramètres météo (étape 9), résolus par la Feature depuis le
+    // `WeatherService`. Neutres avant la première mise à jour.
+    private var cloudParameters = CloudParameters.neutral
 
     // Résolution du volume de densité peint. La forme y est lisse (le détail
     // vient du bruit Perlin-Worley), donc une résolution modeste suffit.
@@ -150,6 +155,11 @@ final class Renderer: NSObject, MTKViewDelegate {
         sunDirection = direction
     }
 
+    /// Reçoit les paramètres de nuage déjà résolus depuis la météo (Feature).
+    func updateCloudParameters(_ parameters: CloudParameters) {
+        cloudParameters = parameters
+    }
+
     /// Reçoit les traits du canvas (coord. normalisées) et repeint le volume.
     func updateStrokes(_ strokes: [BrushStroke]) {
         var dabs: [Dab] = []
@@ -191,7 +201,8 @@ final class Renderer: NSObject, MTKViewDelegate {
             sunDirection: SIMD4(sunDirection.x, sunDirection.y, sunDirection.z, 0.0),
             // Volume cadré sur le frustum visible à la profondeur z = -5.
             volumeCenter: SIMD4(0.0, 0.0, -5.0, 0.0),
-            volumeHalfSize: SIMD4(2.5 * aspect, 2.5, 0.9, 0.0)
+            volumeHalfSize: SIMD4(2.5 * aspect, 2.5, 0.9, 0.0),
+            weather: SIMD4(cloudParameters.coverageBias, cloudParameters.densityScale, 0.0, 0.0)
         )
         var temporal = CloudTemporal(activeIndex: Renderer.activeOrder[frameIndex % 4])
 

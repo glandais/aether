@@ -217,6 +217,33 @@ Référence : Hillaire 2016 & 2020, SwiftAA (voir `BIBLIO.md`). Scène fixe pour
 l'instant ; le choix lieu/heure passera par les réglages. La Lune est calculée
 et testée ; l'éclairage lunaire nocturne (palette froide) reste à brancher.
 
-**Prochaine cible — étape 9 :** initialisation des paramètres du nuage depuis
-`WeatherService` (couverture, humidité…), informant l'état initial. Chaque étape
-doit rester visuellement vérifiable avant la suivante.
+**Étape 9 (initialisation depuis la météo) — terminée.**
+- [x] `OpenMeteoWeatherService` (Services) : météo réelle via l'API publique
+  Open-Meteo (sans clé) — fallback documenté de WeatherKit
+- [x] `CloudParameters` (Domain) : mapping pur météo → {biais de couverture,
+  échelle d'opacité} ; dégagé/sec → fin et clairsemé, couvert/humide → plein et opaque
+- [x] `CanvasView` récupère la météo en tâche async et passe les paramètres au
+  `Renderer` (fallback neutre si réseau indisponible)
+- [x] Tests : mapping overcast/clear/monotone (hors ligne)
+- [x] Vérifiée en direct : Paris dégagé (0 % nuage) → nuage peint aminci
+
+Référence : Hillaire 2016, Open-Meteo (voir `BIBLIO.md`).
+
+---
+
+## Pipeline de rendu — **complet** (étapes 1→9)
+
+Toutes les étapes du pipeline sont implémentées et vérifiées visuellement /
+par tests. Reste, hors pipeline (features applicatives) :
+
+- **Galerie curée + import photo** (`Features/Gallery`, `Features/PhotoImport`) :
+  remplacer le paysage placeholder et alimenter la vraie **depth map**
+  (LiDAR/ARKit ou Depth Anything via `DepthService`) à la place de la depth
+  placeholder de l'étape 6
+- **Réglages** (`Features/Settings`) : choix du lieu et de l'heure (au lieu de la
+  scène Paris fixe) → pilote `AstroService` / `WeatherService`
+- **WeatherKit** comme source primaire (entitlement requis) derrière `WeatherService`
+- **Éclairage lunaire** nocturne (palette froide) quand le Soleil est sous l'horizon
+- **Profilage perf sur device réel** (l'étape 7 n'a été vérifiée que
+  structurellement + parité visuelle simulateur)
+- Pinceau : repeinte incrémentale du volume, sliders (rayon/adoucissement)

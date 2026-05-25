@@ -7,6 +7,7 @@ import SwiftUI
 struct MetalView: UIViewRepresentable {
     var strokes: [BrushStroke]
     var sunDirection: SIMD3<Float>
+    var cloudParameters: CloudParameters
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -26,6 +27,7 @@ struct MetalView: UIViewRepresentable {
 
     func updateUIView(_ uiView: MTKView, context: Context) {
         context.coordinator.renderer?.updateSunDirection(sunDirection)
+        context.coordinator.renderer?.updateCloudParameters(cloudParameters)
         context.coordinator.renderer?.updateStrokes(strokes)
     }
 
