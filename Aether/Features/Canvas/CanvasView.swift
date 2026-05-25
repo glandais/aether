@@ -12,7 +12,11 @@ struct CanvasView: View {
     @State private var model = CanvasModel()
     @State private var cloudParameters = CloudParameters.neutral
     private let astro = SwiftAAAstroService()
-    private let weather = OpenMeteoWeatherService()
+    private let weather = FallbackWeatherService(
+        services: [WeatherKitWeatherService(), OpenMeteoWeatherService()])
+
+    /// Attribution de la source météo réellement utilisée (nil avant résolution).
+    @State private var attribution: WeatherAttribution?
 
     /// Direction du soleil dans le repère caméra : cap (Nord vs Sud) + tangage.
     private var sunDirection: SIMD3<Float> {
@@ -37,6 +41,13 @@ struct CanvasView: View {
                     Spacer()
                     clearButton.padding(.bottom, 32)
                 }
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if let attribution {
+                weatherAttribution(attribution)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 40)
             }
         }
         .task(id: context.id) { await loadWeather() }
@@ -76,8 +87,10 @@ struct CanvasView: View {
             let report = try await weather.report(
                 at: context.scene.coordinate, date: context.scene.date)
             cloudParameters = CloudParameters(weather: report.snapshot)
+            attribution = report.attribution
         } catch {
             cloudParameters = .neutral
+            attribution = nil
         }
     }
 
@@ -111,6 +124,34 @@ struct CanvasView: View {
                 .background(.ultraThinMaterial, in: Capsule())
         }
         .buttonStyle(.plain)
+    }
+
+    /// Lien d'attribution minimal, registre sobre. Affiche le logo de la source
+    /// si fourni (WeatherKit), sinon son nom (Open-Meteo). Exigence légale Apple
+    /// pour les données WeatherKit ; crédit CC-BY pour Open-Meteo.
+    @ViewBuilder
+    private func weatherAttribution(_ attribution: WeatherAttribution) -> some View {
+        let content = Group {
+            if let logoURL = attribution.logoDarkURL ?? attribution.logoLightURL {
+                AsyncImage(url: logoURL) { image in
+                    image.resizable().scaledToFit()
+                } placeholder: {
+                    Text(attribution.serviceName)
+                }
+                .frame(height: 12)
+            } else {
+                Text(attribution.serviceName)
+            }
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+
+        if let url = attribution.legalURL {
+            Link(destination: url) { content }
+                .accessibilityLabel(Text("attribution.weather", tableName: "Aether"))
+        } else {
+            content
+        }
     }
 }
 
