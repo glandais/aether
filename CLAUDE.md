@@ -124,6 +124,18 @@ signature équipe. Build + test verts.
 Le paysage est un dégradé placeholder ; la galerie curée / l'import photo
 viendront alimenter `landscapeTexture`.
 
-**Prochaine cible — étape 2 :** raymarching d'un seul nuage analytique (sphère
-de bruit) avec éclairage directionnel fixe, à la place du quad de test. Chaque
-étape doit rester visuellement vérifiable avant la suivante.
+**Étape 2 (raymarching nuage analytique) — terminée.**
+- [x] `Cloud.metal` : raymarching d'une sphère de bruit (densité analytique
+  fBm érodée façon Schneider), caméra pinhole fixe
+- [x] Transmittance vue Beer-Lambert (Scratchapixel) + light-march vers un
+  soleil directionnel fixe (auto-ombrage)
+- [x] Composition « over » prémultipliée par-dessus le paysage
+- [x] Vérifiée visuellement sur simulateur (iPhone 17 Pro)
+
+Référence : Schneider 2015, Häggström, Quilez, Scratchapixel
+(voir `BIBLIO.md`). La fonction de phase Henyey-Greenstein, le *powder* et le
+scattering atmosphérique sont volontairement reportés à l'étape 5.
+
+**Prochaine cible — étape 3 :** remplacer le bruit analytique par des volume
+textures 3D (Perlin-Worley) précomputées en compute shader. Chaque étape doit
+rester visuellement vérifiable avant la suivante.

@@ -1,17 +1,27 @@
 import CoreGraphics
 import MetalKit
 import os
+import simd
 
-/// Rendu de l'étape 1 : le paysage en texture de fond plein écran, surmonté
-/// d'un quad de test composité (alpha blending). Les étapes suivantes
-/// (raymarching, volume textures, scattering) remplaceront le quad par les
-/// nuages volumétriques.
+/// Uniforms du shader de nuage. La disposition mémoire doit correspondre à
+/// `CloudUniforms` dans `Cloud.metal` (float2, float, float, float4).
+private struct CloudUniforms {
+    var resolution: SIMD2<Float>
+    var time: Float
+    var aspect: Float
+    var sunDirection: SIMD4<Float>
+}
+
+/// Rendu de l'étape 2 : le paysage en texture de fond, surmonté d'un nuage
+/// analytique unique (sphère de bruit) raymarché et éclairé par un soleil
+/// directionnel fixe. Le quad de test de l'étape 1 est remplacé par ce nuage.
 final class Renderer: NSObject, MTKViewDelegate {
     private let commandQueue: MTLCommandQueue
     private let backgroundPipeline: MTLRenderPipelineState
-    private let testQuadPipeline: MTLRenderPipelineState
+    private let cloudPipeline: MTLRenderPipelineState
     private let landscapeTexture: MTLTexture
     private let sampler: MTLSamplerState
+    private let startTime = CACurrentMediaTime()
     private let log = Logger(subsystem: "io.github.glandais.aether", category: "Renderer")
 
     init?(view: MTKView) {
@@ -25,8 +35,8 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         guard let backgroundVertex = library.makeFunction(name: "background_vertex"),
               let backgroundFragment = library.makeFunction(name: "background_fragment"),
-              let testQuadVertex = library.makeFunction(name: "testquad_vertex"),
-              let testQuadFragment = library.makeFunction(name: "testquad_fragment") else {
+              let cloudVertex = library.makeFunction(name: "cloud_vertex"),
+              let cloudFragment = library.makeFunction(name: "cloud_fragment") else {
             return nil
         }
 
@@ -34,10 +44,10 @@ final class Renderer: NSObject, MTKViewDelegate {
         do {
             backgroundPipeline = try Renderer.makePipeline(
                 device: device, vertex: backgroundVertex, fragment: backgroundFragment,
-                pixelFormat: format, blending: false)
-            testQuadPipeline = try Renderer.makePipeline(
-                device: device, vertex: testQuadVertex, fragment: testQuadFragment,
-                pixelFormat: format, blending: true)
+                pixelFormat: format, blend: .none)
+            cloudPipeline = try Renderer.makePipeline(
+                device: device, vertex: cloudVertex, fragment: cloudFragment,
+                pixelFormat: format, blend: .premultiplied)
         } catch {
             return nil
         }
@@ -61,7 +71,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     }
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
-        // Aucun état dépendant de la taille à recalculer pour l'instant.
+        // L'aspect est relu à chaque frame depuis la taille du drawable.
     }
 
     func draw(in view: MTKView) {
@@ -78,9 +88,20 @@ final class Renderer: NSObject, MTKViewDelegate {
         encoder.setFragmentSamplerState(sampler, index: 0)
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
 
-        // 2. Quad de test composité par-dessus (alpha blending).
-        encoder.setRenderPipelineState(testQuadPipeline)
-        encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        // 2. Nuage analytique raymarché, composité par-dessus (premultiplied).
+        let size = view.drawableSize
+        let width = Float(max(size.width, 1))
+        let height = Float(max(size.height, 1))
+        var uniforms = CloudUniforms(
+            resolution: SIMD2(width, height),
+            time: Float(CACurrentMediaTime() - startTime),
+            aspect: width / height,
+            // Soleil bas et chaud, cohérent avec l'horizon du paysage.
+            sunDirection: SIMD4(0.55, 0.35, 0.20, 0.0)
+        )
+        encoder.setRenderPipelineState(cloudPipeline)
+        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<CloudUniforms>.stride, index: 0)
+        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
 
         encoder.endEncoding()
         commandBuffer.present(drawable)
@@ -89,12 +110,17 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     // MARK: - Construction
 
+    private enum Blend {
+        case none
+        case premultiplied
+    }
+
     private static func makePipeline(
         device: MTLDevice,
         vertex: MTLFunction,
         fragment: MTLFunction,
         pixelFormat: MTLPixelFormat,
-        blending: Bool
+        blend: Blend
     ) throws -> MTLRenderPipelineState {
         let descriptor = MTLRenderPipelineDescriptor()
         descriptor.vertexFunction = vertex
@@ -102,12 +128,13 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         let attachment = descriptor.colorAttachments[0]
         attachment?.pixelFormat = pixelFormat
-        if blending {
+        if case .premultiplied = blend {
+            // Compositing « over » avec couleur prémultipliée par l'alpha.
             attachment?.isBlendingEnabled = true
             attachment?.rgbBlendOperation = .add
             attachment?.alphaBlendOperation = .add
-            attachment?.sourceRGBBlendFactor = .sourceAlpha
-            attachment?.sourceAlphaBlendFactor = .sourceAlpha
+            attachment?.sourceRGBBlendFactor = .one
+            attachment?.sourceAlphaBlendFactor = .one
             attachment?.destinationRGBBlendFactor = .oneMinusSourceAlpha
             attachment?.destinationAlphaBlendFactor = .oneMinusSourceAlpha
         }
