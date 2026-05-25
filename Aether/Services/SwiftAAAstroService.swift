@@ -36,4 +36,8 @@ struct SwiftAAAstroService: AstroService {
             altitude: horizontal.altitude.value * degreesToRadians
         )
     }
+
+    func moonIlluminatedFraction(date: Date) -> Double {
+        Moon(julianDay: JulianDay(date)).illuminatedFraction()
+    }
 }

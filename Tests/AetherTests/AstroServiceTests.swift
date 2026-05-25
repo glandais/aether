@@ -67,6 +67,12 @@ struct AstroServiceTests {
         #expect(moon.body == .moon)
     }
 
+    @Test("La fraction éclairée de la Lune est dans [0, 1]")
+    func moonIlluminationInRange() {
+        let fraction = service.moonIlluminatedFraction(date: utc(2024, 3, 20, 22, 0))
+        #expect(fraction >= 0 && fraction <= 1)
+    }
+
     @Test("La direction monde respecte la convention -Z = Nord, +X = Est")
     func worldDirectionConvention() {
         // Sud, 30° d'altitude → +Z (derrière, caméra face Nord), +Y vers le haut.

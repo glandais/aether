@@ -3,75 +3,115 @@ import SwiftUI
 import simd
 
 /// Hôte du canvas de rendu volumétrique, pour un paysage donné. La photo est
-/// affichée à son propre aspect (lettrage) pour éviter toute déformation ; les
-/// paysages curés abstraits occupent le plein cadre. L'utilisateur peint des
-/// silhouettes de nuages, éclairées selon le lieu/instant/cadrage de la scène.
+/// affichée à son propre aspect (lettrage) ; les paysages curés abstraits
+/// occupent le plein cadre. L'utilisateur peint des silhouettes de nuages,
+/// éclairées selon le lieu/cadrage de la scène et l'heure choisie (le curseur
+/// déplace le soleil et la lune ; le nuage se rallume en conséquence).
 struct CanvasView: View {
     let context: SceneContext
 
     @State private var model = CanvasModel()
     @State private var cloudParameters = CloudParameters.neutral
+    /// Heure locale choisie (heures, 0…24). `nil` = heure d'origine de la scène.
+    @State private var hourOverride: Double?
+    @State private var attribution: WeatherAttribution?
+
     private let astro = SwiftAAAstroService()
     private let weather = FallbackWeatherService(
         services: [WeatherKitWeatherService(), OpenMeteoWeatherService()])
 
-    /// Attribution de la source météo réellement utilisée (nil avant résolution).
-    @State private var attribution: WeatherAttribution?
-
-    /// Position apparente du soleil pour la scène (direction + altitude).
-    private var sunPosition: CelestialPosition {
-        astro.position(of: .sun, at: context.scene.coordinate, date: context.scene.date)
-    }
-
-    /// Direction du soleil dans le repère caméra : cap (Nord vs Sud) + tangage.
-    private var sunDirection: SIMD3<Float> {
-        sunPosition.cameraDirection(
-            heading: context.scene.heading,
-            pitch: context.scene.pitch,
-            roll: context.scene.roll)
-    }
-
-    /// Éclairage selon la hauteur du soleil, calé sur l'exposition de la photo :
-    /// blanc et lumineux en plein jour, chaud et faible au crépuscule.
-    private var lighting: SkyLighting {
-        SkyLighting(sunAltitude: sunPosition.altitude)
-    }
-    private var sunColor: SIMD3<Float> { lighting.sunColor * context.skyExposure }
-    private var skyAmbient: SIMD3<Float> { lighting.ambient * context.skyExposure }
-
-    /// tan(FOV/2) vertical : cale la projection du ciel sur le zoom de la photo.
-    private var tanHalfFieldOfView: Float {
-        Float(tan(context.scene.fieldOfView / 2))
+    /// Éclairage résolu pour l'instant courant : direction, couleur, ambiance.
+    private struct ResolvedLight {
+        var direction: SIMD3<Float>
+        var color: SIMD3<Float>
+        var ambient: SIMD3<Float>
+        var isDaytime: Bool
     }
 
     var body: some View {
-        ZStack {
+        let light = resolvedLight
+        return ZStack {
             Color.black.ignoresSafeArea()
-            canvas
-            if !model.strokes.isEmpty {
-                VStack {
-                    Spacer()
-                    clearButton.padding(.bottom, 32)
-                }
+            canvas(light: light)
+            VStack(spacing: 14) {
+                Spacer()
+                if !model.strokes.isEmpty { clearButton }
+                timeBar(isDaytime: light.isDaytime)
             }
+            .padding(.bottom, 28)
         }
-        .overlay(alignment: .bottomTrailing) {
+        .overlay(alignment: .top) {
             if let attribution {
-                weatherAttribution(attribution)
-                    .padding(.trailing, 16)
-                    .padding(.bottom, 40)
+                weatherAttribution(attribution).padding(.top, 8)
             }
         }
         .task(id: context.id) { await loadWeather() }
     }
 
+    // MARK: - Heure & éclairage
+
+    private var sceneTimeZone: TimeZone {
+        TimeZone(secondsFromGMT: Int(context.scene.utcOffset)) ?? .gmt
+    }
+
+    /// Heure locale d'origine de la scène (heures décimales).
+    private var initialHour: Double {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = sceneTimeZone
+        let components = calendar.dateComponents([.hour, .minute], from: context.scene.date)
+        return Double(components.hour ?? 12) + Double(components.minute ?? 0) / 60.0
+    }
+
+    private var currentHour: Double { hourOverride ?? initialHour }
+
+    /// Instant effectif = jour de la scène, à l'heure locale choisie.
+    private var effectiveDate: Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = sceneTimeZone
+        let startOfDay = calendar.startOfDay(for: context.scene.date)
+        return startOfDay.addingTimeInterval(currentHour * 3600)
+    }
+
+    /// Soleil le jour, lune la nuit (fondu au crépuscule), calé sur l'exposition.
+    private var resolvedLight: ResolvedLight {
+        let date = effectiveDate
+        let coordinate = context.scene.coordinate
+        let sun = astro.position(of: .sun, at: coordinate, date: date)
+        let moon = astro.position(of: .moon, at: coordinate, date: date)
+        let illumination = astro.moonIlluminatedFraction(date: date)
+
+        // 1 quand le soleil est levé, 0 la nuit ; fondu dans la bande crépusculaire.
+        let sunWeight = SkyLighting.smoothstep(-0.08, 0.06, Float(sun.altitude))
+        let sky = SkyLighting(sunAltitude: sun.altitude)
+        let moonLight = MoonLighting(moonAltitude: moon.altitude, illuminatedFraction: illumination)
+
+        let sunDir = sun.cameraDirection(
+            heading: context.scene.heading, pitch: context.scene.pitch, roll: context.scene.roll)
+        let moonDir = moon.cameraDirection(
+            heading: context.scene.heading, pitch: context.scene.pitch, roll: context.scene.roll)
+        var direction = moonDir + (sunDir - moonDir) * sunWeight
+        // Soleil et lune opposés : le mélange peut s'annuler → repli sur le dominant.
+        direction = length(direction) < 0.01 ? (sunWeight >= 0.5 ? sunDir : moonDir) : normalize(direction)
+
+        let exposure = context.skyExposure
+        let color = (sky.sunColor * sunWeight + moonLight.color * (1 - sunWeight)) * exposure
+        let ambient = (sky.ambient * sunWeight + moonLight.ambient * (1 - sunWeight)) * exposure
+        return ResolvedLight(direction: direction, color: color, ambient: ambient, isDaytime: sunWeight >= 0.5)
+    }
+
+    private var tanHalfFieldOfView: Float {
+        Float(tan(context.scene.fieldOfView / 2))
+    }
+
+    // MARK: - Vues
+
     @ViewBuilder
-    private var canvas: some View {
+    private func canvas(light: ResolvedLight) -> some View {
         let metalView = MetalView(
             strokes: model.strokes,
-            sunDirection: sunDirection,
-            sunColor: sunColor,
-            skyAmbient: skyAmbient,
+            sunDirection: light.direction,
+            sunColor: light.color,
+            skyAmbient: light.ambient,
             cloudParameters: cloudParameters,
             cameraTanHalfFov: tanHalfFieldOfView,
             landscape: context.landscape,
@@ -95,7 +135,56 @@ struct CanvasView: View {
         }
     }
 
-    /// Récupère la météo réelle pour la scène ; en cas d'échec, paramètres neutres.
+    /// Curseur d'heure : déplace le soleil/la lune, le nuage se rallume.
+    private func timeBar(isDaytime: Bool) -> some View {
+        let hour = Binding(
+            get: { currentHour },
+            set: { hourOverride = $0 }
+        )
+        return HStack(spacing: 12) {
+            Image(systemName: isDaytime ? "sun.max" : "moon.stars")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Slider(value: hour, in: 0...24)
+                .tint(.white.opacity(0.55))
+            Text(timeLabel)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 44, alignment: .trailing)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial, in: Capsule())
+        .padding(.horizontal, 24)
+    }
+
+    private var timeLabel: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = sceneTimeZone
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: effectiveDate)
+    }
+
+    private var clearButton: some View {
+        Button {
+            model.clear()
+        } label: {
+            // Table « Aether » : le catalogue est `Aether.xcstrings`, pas le défaut.
+            Text("action.clear", tableName: "Aether")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
+                .background(.ultraThinMaterial, in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Météo
+
+    /// Récupère la météo réelle pour la scène (heure d'origine) ; en cas d'échec,
+    /// paramètres neutres. L'heure scrutée n'affecte que la lumière, pas la météo.
     private func loadWeather() async {
         do {
             let report = try await weather.report(
@@ -108,41 +197,6 @@ struct CanvasView: View {
         }
     }
 
-    private func paintGesture(in size: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 0)
-            .onChanged { value in
-                let point = SIMD2(
-                    Float(value.location.x / size.width),
-                    Float(value.location.y / size.height)
-                ).clamped()
-                if model.isDrawing {
-                    model.extendStroke(to: point)
-                } else {
-                    model.beginStroke(at: point)
-                }
-            }
-            .onEnded { _ in model.endStroke() }
-    }
-
-    private var clearButton: some View {
-        Button {
-            model.clear()
-        } label: {
-            // Table « Aether » : le catalogue est `Aether.xcstrings`, pas le
-            // `Localizable` par défaut.
-            Text("action.clear", tableName: "Aether")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 10)
-                .background(.ultraThinMaterial, in: Capsule())
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// Lien d'attribution minimal, registre sobre. Affiche le logo de la source
-    /// si fourni (WeatherKit), sinon son nom (Open-Meteo). Exigence légale Apple
-    /// pour les données WeatherKit ; crédit CC-BY pour Open-Meteo.
     @ViewBuilder
     private func weatherAttribution(_ attribution: WeatherAttribution) -> some View {
         let content = Group {
@@ -166,6 +220,22 @@ struct CanvasView: View {
         } else {
             content
         }
+    }
+
+    private func paintGesture(in size: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                let point = SIMD2(
+                    Float(value.location.x / size.width),
+                    Float(value.location.y / size.height)
+                ).clamped()
+                if model.isDrawing {
+                    model.extendStroke(to: point)
+                } else {
+                    model.beginStroke(at: point)
+                }
+            }
+            .onEnded { _ in model.endStroke() }
     }
 }
 

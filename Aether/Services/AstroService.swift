@@ -7,4 +7,7 @@ protocol AstroService: Sendable {
         at coordinate: GeoCoordinate,
         date: Date
     ) -> CelestialPosition
+
+    /// Fraction éclairée de la Lune (0 = nouvelle, 1 = pleine) à l'instant donné.
+    func moonIlluminatedFraction(date: Date) -> Double
 }

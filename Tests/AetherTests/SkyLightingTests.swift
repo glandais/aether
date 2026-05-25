@@ -27,4 +27,18 @@ struct SkyLightingTests {
         #expect(luminance(night.sunColor) < luminance(SkyLighting(sunAltitude: 0.2).sunColor))
         #expect(night.ambient.z < 0.2)
     }
+
+    @Test("La lune : pleine plus claire que nouvelle, froide, sombre sous l'horizon")
+    func moonLighting() {
+        let full = MoonLighting(moonAltitude: 1.0, illuminatedFraction: 1.0)
+        let new = MoonLighting(moonAltitude: 1.0, illuminatedFraction: 0.0)
+        let belowHorizon = MoonLighting(moonAltitude: -0.5, illuminatedFraction: 1.0)
+
+        #expect(luminance(full.color) > luminance(new.color))
+        #expect(luminance(belowHorizon.color) < luminance(full.color))
+        // Teinte froide : composante bleue supérieure à la rouge.
+        #expect(full.color.z > full.color.x)
+        // La lune éclaire bien moins que le soleil de plein jour.
+        #expect(luminance(full.color) < luminance(SkyLighting(sunAltitude: 1.2).sunColor))
+    }
 }

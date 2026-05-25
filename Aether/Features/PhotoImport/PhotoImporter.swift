@@ -24,6 +24,8 @@ struct PhotoImporter {
         var pitch: Double?
         /// Roulis résiduel (radians) après redressement EXIF.
         var roll: Double?
+        /// Décalage UTC (secondes) depuis `OffsetTimeOriginal`, si présent.
+        var utcOffset: TimeInterval?
     }
 
     private let depthService: DepthService
@@ -49,14 +51,17 @@ struct PhotoImporter {
             Self.verticalFieldOfView(focalLength35: $0, aspect: aspect)
         } ?? Scene.defaultFieldOfView
 
+        let coordinate = metadata.coordinate ?? fallbackCoordinate
         let scene = Scene(
             title: "Photo",
-            coordinate: metadata.coordinate ?? fallbackCoordinate,
+            coordinate: coordinate,
             date: metadata.date ?? Date(),
             heading: metadata.heading ?? 0,
             fieldOfView: fieldOfView,
             pitch: metadata.pitch ?? 0,
-            roll: metadata.roll ?? 0
+            roll: metadata.roll ?? 0,
+            // Décalage civil EXIF si présent, sinon approx. longitude.
+            utcOffset: metadata.utcOffset ?? (coordinate.longitude / 15.0 * 3600.0)
         )
         // La profondeur est optionnelle : sans elle, pas d'occlusion par le relief.
         let depthMap = try? await depthService.estimateDepth(for: oriented)
@@ -91,8 +96,19 @@ struct PhotoImporter {
             heading: heading(properties),
             focalLength35: focalLength35(properties),
             pitch: acceleration.flatMap { pitch(fromAccelerationVector: $0) },
-            roll: acceleration.flatMap { roll(fromAccelerationVector: $0, orientation: orientation) }
+            roll: acceleration.flatMap { roll(fromAccelerationVector: $0, orientation: orientation) },
+            utcOffset: utcOffsetSeconds(properties)
         )
+    }
+
+    /// Décalage UTC (secondes) depuis `OffsetTimeOriginal` ("+02:00").
+    private static func utcOffsetSeconds(_ properties: [CFString: Any]) -> TimeInterval? {
+        guard let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any],
+              let offset = exif[kCGImagePropertyExifOffsetTimeOriginal] as? String,
+              let timeZone = timeZone(fromOffset: offset) else {
+            return nil
+        }
+        return TimeInterval(timeZone.secondsFromGMT())
     }
 
     /// `AccelerationVector` (MakerNote Apple, clé "8") : vecteur 3D « haut »

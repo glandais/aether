@@ -21,6 +21,9 @@ struct Scene: Identifiable, Equatable, Sendable {
     /// Roulis de la caméra : radians, inclinaison latérale résiduelle (après
     /// redressement EXIF). Reconstruit depuis l'`AccelerationVector`.
     var roll: Double
+    /// Décalage UTC du lieu (secondes) : pour afficher/scruter l'heure locale.
+    /// EXIF `OffsetTimeOriginal` pour les photos, approx. longitude sinon.
+    var utcOffset: TimeInterval
 
     /// FOV vertical par défaut ≈ 53° (caméra grand-angle générique).
     static let defaultFieldOfView = 0.9273
@@ -34,7 +37,8 @@ struct Scene: Identifiable, Equatable, Sendable {
         heading: Double = 0,
         fieldOfView: Double = Scene.defaultFieldOfView,
         pitch: Double = 0,
-        roll: Double = 0
+        roll: Double = 0,
+        utcOffset: TimeInterval = 0
     ) {
         self.id = id
         self.title = title
@@ -45,5 +49,6 @@ struct Scene: Identifiable, Equatable, Sendable {
         self.fieldOfView = fieldOfView
         self.pitch = pitch
         self.roll = roll
+        self.utcOffset = utcOffset
     }
 }

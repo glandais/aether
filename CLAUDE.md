@@ -300,11 +300,26 @@ Le nuage s'éclaire selon la scène, plus de constantes crépusculaires figées 
 - Tests : `FallbackWeatherServiceTests` (cascade), `WeatherKitMappingTests`
   (condition → Domain). L'appel WeatherKit live est vérifié manuellement.
 
+## Heure choisie + lune — **terminé**
+
+- **Curseur d'heure** (`CanvasView`) : déplace l'instant de la scène (heure
+  locale via `Scene.utcOffset`) → l'`AstroService` recalcule soleil **et** lune,
+  le nuage se rallume en direct (dawn chaud → midi blanc → crépuscule → nuit).
+  La météo reste figée à l'heure d'origine (seule la lumière bouge).
+- **Éclairage lunaire** (`MoonLighting`, Domain) : froid et faible, modulé par la
+  hauteur de la lune et sa fraction éclairée (`AstroService.moonIlluminatedFraction`,
+  SwiftAA). `CanvasView` fond soleil↔lune selon la hauteur du soleil (bande
+  crépusculaire) ; nuit sans lune → nuage sombre (correct).
+- `Scene.utcOffset` : EXIF `OffsetTimeOriginal` (photos) ou approx. longitude (curés).
+- Tests : `MoonLighting` (phase/hauteur, teinte froide), fraction éclairée ∈ [0,1].
+- Vérifié : scène curée scrutée midi → nuage blanc ; nuit → nuage sombre/froid.
+
 ## Reste à faire
 
-- **Réglages** (`Features/Settings`) : ajuster lieu/heure (les photos les
-  tirent de l'EXIF ; les paysages curés ont des presets).
+- **Réglages** (`Features/Settings`) : choisir le **lieu** (l'heure est déjà
+  réglable au canvas ; manque la sélection géographique manuelle).
 - **LiDAR / ARKit** comme source de profondeur alternative derrière `DepthService`.
-- **Éclairage lunaire** nocturne (palette froide) quand le Soleil est sous l'horizon.
+- **Fond de ciel dynamique** : le paysage est une image figée — il ne suit pas
+  l'heure scrutée (seul le nuage se rallume). Ciel procédural = gros chantier.
 - **Profilage perf sur device réel** (étape 7 vérifiée structurellement seulement).
 - Pinceau : repeinte incrémentale du volume, sliders (rayon/adoucissement).
