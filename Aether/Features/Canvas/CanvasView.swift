@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import simd
 
@@ -6,10 +7,25 @@ import simd
 struct CanvasView: View {
     @State private var model = CanvasModel()
 
+    /// Scène par défaut : Paris au crépuscule (heure UTC). Le choix du lieu et
+    /// de l'heure passera par les réglages (étape future).
+    private static let defaultScene = Scene(
+        title: "Paris",
+        coordinate: GeoCoordinate(latitude: 48.8566, longitude: 2.3522),
+        date: makeDefaultDate()
+    )
+    private let astro = SwiftAAAstroService()
+
+    /// Direction du soleil résolue depuis l'`AstroService` pour la scène.
+    private var sunDirection: SIMD3<Float> {
+        astro.position(of: .sun, at: Self.defaultScene.coordinate, date: Self.defaultScene.date)
+            .worldDirection
+    }
+
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .bottom) {
-                MetalView(strokes: model.strokes)
+                MetalView(strokes: model.strokes, sunDirection: sunDirection)
                     .contentShape(Rectangle())
                     .gesture(paintGesture(in: geometry.size))
 
@@ -52,6 +68,20 @@ struct CanvasView: View {
                 .background(.ultraThinMaterial, in: Capsule())
         }
         .buttonStyle(.plain)
+    }
+}
+
+private extension CanvasView {
+    static func makeDefaultDate() -> Date {
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 5
+        components.day = 25
+        components.hour = 19
+        components.minute = 15
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? .gmt
+        return calendar.date(from: components) ?? Date()
     }
 }
 

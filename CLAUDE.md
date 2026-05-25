@@ -201,6 +201,22 @@ accumulation temporelle au même pixel (rafraîchissement sur 4 frames,
 invisible vu la dérive lente). Une caméra mobile nécessiterait de vrais motion
 vectors. Référence : Häkkinen, Nubis Evolved (voir `BIBLIO.md`).
 
-**Prochaine cible — étape 8 :** position soleil/lune dynamique alimentée par
-`AstroService` (formules Meeus / SwiftAA), en remplacement de la direction de
-soleil fixe. Chaque étape doit rester visuellement vérifiable avant la suivante.
+**Étape 8 (position soleil/lune dynamique) — terminée.**
+- [x] `SwiftAAAstroService` (Services) : position apparente soleil/lune en
+  coordonnées horizontales (SwiftAA / Meeus), conventions converties (azimut
+  depuis le Nord, longitude Est→Ouest, radians)
+- [x] `CelestialPosition.worldDirection` (Domain) : mapping horizontal → monde
+  (caméra face Nord : -Z = Nord, +X = Est, +Y = haut)
+- [x] `CanvasView` (Feature) résout la direction et la passe au `Renderer` — le
+  Rendering ne dépend pas des Services
+- [x] Tests astro (Swift Testing) : midi solaire au Sud/haut, lever à l'Est,
+  Soleil sous l'horizon la nuit, Lune dans les plages valides, convention monde
+- [x] Vérifiée : scène par défaut Paris au crépuscule, soleil bas calculé
+
+Référence : Hillaire 2016 & 2020, SwiftAA (voir `BIBLIO.md`). Scène fixe pour
+l'instant ; le choix lieu/heure passera par les réglages. La Lune est calculée
+et testée ; l'éclairage lunaire nocturne (palette froide) reste à brancher.
+
+**Prochaine cible — étape 9 :** initialisation des paramètres du nuage depuis
+`WeatherService` (couverture, humidité…), informant l'état initial. Chaque étape
+doit rester visuellement vérifiable avant la suivante.

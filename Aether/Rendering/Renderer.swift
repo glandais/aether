@@ -55,6 +55,10 @@ final class Renderer: NSObject, MTKViewDelegate {
     // Ordre de Bayer 2×2 : répartit les 4 cellules sur 4 frames.
     private static let activeOrder: [UInt32] = [0, 3, 1, 2]
 
+    // Direction du soleil (vers l'astre), résolue par la Feature depuis
+    // l'`AstroService` (étape 8). Valeur de repli avant la première mise à jour.
+    private var sunDirection = SIMD3<Float>(0.40, 0.12, -0.50)
+
     // Résolution du volume de densité peint. La forme y est lisse (le détail
     // vient du bruit Perlin-Worley), donc une résolution modeste suffit.
     private static let volumeWidth = 96
@@ -140,6 +144,12 @@ final class Renderer: NSObject, MTKViewDelegate {
         // Les cibles demi-rés sont (re)créées paresseusement dans `draw`.
     }
 
+    /// Reçoit la direction du soleil déjà résolue (espace monde) depuis la
+    /// Feature. Le Rendering ne dépend pas de l'`AstroService`.
+    func updateSunDirection(_ direction: SIMD3<Float>) {
+        sunDirection = direction
+    }
+
     /// Reçoit les traits du canvas (coord. normalisées) et repeint le volume.
     func updateStrokes(_ strokes: [BrushStroke]) {
         var dabs: [Dab] = []
@@ -177,9 +187,8 @@ final class Renderer: NSObject, MTKViewDelegate {
             resolution: SIMD2(Float(halfWidth), Float(halfHeight)),
             time: Float(CACurrentMediaTime() - startTime),
             aspect: aspect,
-            // Soleil bas, chaud, et en partie derrière le nuage (contre-jour)
-            // pour la frange argentée du crépuscule.
-            sunDirection: SIMD4(0.40, 0.12, -0.50, 0.0),
+            // Direction du soleil résolue par l'AstroService (étape 8).
+            sunDirection: SIMD4(sunDirection.x, sunDirection.y, sunDirection.z, 0.0),
             // Volume cadré sur le frustum visible à la profondeur z = -5.
             volumeCenter: SIMD4(0.0, 0.0, -5.0, 0.0),
             volumeHalfSize: SIMD4(2.5 * aspect, 2.5, 0.9, 0.0)

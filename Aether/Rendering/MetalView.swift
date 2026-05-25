@@ -6,6 +6,7 @@ import SwiftUI
 /// sont poussés vers le `Renderer` à chaque mise à jour SwiftUI.
 struct MetalView: UIViewRepresentable {
     var strokes: [BrushStroke]
+    var sunDirection: SIMD3<Float>
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -24,6 +25,7 @@ struct MetalView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: MTKView, context: Context) {
+        context.coordinator.renderer?.updateSunDirection(sunDirection)
         context.coordinator.renderer?.updateStrokes(strokes)
     }
 
