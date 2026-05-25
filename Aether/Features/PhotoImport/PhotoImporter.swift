@@ -20,6 +20,10 @@ struct PhotoImporter {
         /// Focale 35 mm équivalente (mm), si présente. Le FOV en découle, mais
         /// dépend de l'orientation de la photo (calculé dans `makeContext`).
         var focalLength35: Double?
+        /// Tangage (radians) reconstruit depuis l'`AccelerationVector` Apple.
+        var pitch: Double?
+        /// Roulis résiduel (radians) après redressement EXIF.
+        var roll: Double?
     }
 
     private let depthService: DepthService
@@ -50,7 +54,9 @@ struct PhotoImporter {
             coordinate: metadata.coordinate ?? fallbackCoordinate,
             date: metadata.date ?? Date(),
             heading: metadata.heading ?? 0,
-            fieldOfView: fieldOfView
+            fieldOfView: fieldOfView,
+            pitch: metadata.pitch ?? 0,
+            roll: metadata.roll ?? 0
         )
         // La profondeur est optionnelle : sans elle, pas d'occlusion par le relief.
         let depthMap = try? await depthService.estimateDepth(for: oriented)
@@ -76,12 +82,56 @@ struct PhotoImporter {
     static func parseMetadata(_ properties: [CFString: Any]) -> Metadata {
         let coordinate = gpsCoordinate(properties)
         let date = timestamp(properties, longitude: coordinate?.longitude)
+        let orientation = properties[kCGImagePropertyOrientation] as? UInt32 ?? 1
+        let acceleration = accelerationVector(properties)
         return Metadata(
             coordinate: coordinate,
             date: date,
             heading: heading(properties),
-            focalLength35: focalLength35(properties)
+            focalLength35: focalLength35(properties),
+            pitch: acceleration.flatMap { pitch(fromAccelerationVector: $0) },
+            roll: acceleration.flatMap { roll(fromAccelerationVector: $0, orientation: orientation) }
         )
+    }
+
+    /// `AccelerationVector` (MakerNote Apple, clé "8") : vecteur 3D « haut »
+    /// (opposé à la gravité) dans le repère appareil [x gauche, y bas, z arrière].
+    static func accelerationVector(_ properties: [CFString: Any]) -> [Double]? {
+        guard let maker = properties[kCGImagePropertyMakerAppleDictionary] as? [String: Any],
+              let raw = maker["8"] as? [Any] else {
+            return nil
+        }
+        let values = raw.compactMap { ($0 as? NSNumber)?.doubleValue }
+        return values.count == 3 ? values : nil
+    }
+
+    /// Tangage depuis le vecteur « haut » : `asin(z)`. Robuste à l'orientation
+    /// (la rotation portrait/paysage est autour de Z, ne change pas z).
+    static func pitch(fromAccelerationVector vector: [Double]) -> Double? {
+        guard vector.count == 3 else { return nil }
+        let norm = (vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2]).squareRoot()
+        guard norm > 1e-6 else { return nil }
+        return asin(max(-1.0, min(1.0, vector[2] / norm)))
+    }
+
+    /// Roulis résiduel : `atan2(x, -y)` (inclinaison dans le repère portrait)
+    /// moins la rotation cardinale du redressement EXIF. Convention validée sur
+    /// photos iPhone réelles pour les orientations 1 (paysage) et 6 (portrait) ;
+    /// 3 et 8 inférées par symétrie.
+    static func roll(fromAccelerationVector vector: [Double], orientation: UInt32) -> Double? {
+        guard vector.count == 3 else { return nil }
+        let raw = atan2(vector[0], -vector[1])
+        let cardinal: Double
+        switch orientation {
+        case 3, 4: cardinal = .pi / 2     // paysage (home à gauche)
+        case 5, 6: cardinal = 0           // portrait (validé : IMG_0793/0807)
+        case 7, 8: cardinal = .pi         // portrait inversé
+        default: cardinal = -.pi / 2      // 1, 2 — paysage (validé : IMG_0792)
+        }
+        var residual = raw - cardinal
+        while residual > .pi { residual -= 2 * .pi }
+        while residual < -.pi { residual += 2 * .pi }
+        return residual
     }
 
     /// Cap de prise de vue depuis `GPSImgDirection` (degrés → radians).
@@ -124,14 +174,38 @@ struct PhotoImporter {
         }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "UTC")
         formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
+
+        // L'iPhone écrit le décalage civil exact (`OffsetTimeOriginal`, ex.
+        // "+02:00") : on l'utilise pour obtenir l'UTC précis.
+        if let offset = exif[kCGImagePropertyExifOffsetTimeOriginal] as? String,
+           let timeZone = Self.timeZone(fromOffset: offset) {
+            formatter.timeZone = timeZone
+            return formatter.date(from: string)
+        }
+
+        // Repli : on approxime le fuseau par la longitude (heure solaire moyenne).
+        formatter.timeZone = TimeZone(identifier: "UTC")
         guard let local = formatter.date(from: string) else {
             return nil
         }
-        // Convertit l'heure locale (lue comme UTC) en UTC réel via la longitude.
         let offsetHours = (longitude ?? 0) / 15.0
         return local.addingTimeInterval(-offsetHours * 3600)
+    }
+
+    /// Convertit un décalage EXIF "+02:00" / "-05:00" en `TimeZone`.
+    static func timeZone(fromOffset offset: String) -> TimeZone? {
+        let trimmed = offset.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count == 6, let sign = trimmed.first,
+              sign == "+" || sign == "-" else {
+            return nil
+        }
+        let parts = trimmed.dropFirst().split(separator: ":")
+        guard parts.count == 2, let hours = Int(parts[0]), let minutes = Int(parts[1]) else {
+            return nil
+        }
+        let seconds = (hours * 3600 + minutes * 60) * (sign == "-" ? -1 : 1)
+        return TimeZone(secondsFromGMT: seconds)
     }
 
     private static func orientedImage(_ image: CGImage, properties: [CFString: Any]) -> CGImage? {

@@ -15,10 +15,12 @@ struct Scene: Identifiable, Equatable, Sendable {
     /// Champ de vision vertical de la caméra, en radians (dérivé de la focale
     /// EXIF). Détermine l'échelle de projection du ciel sur la photo.
     var fieldOfView: Double
-    /// Tangage de la caméra : radians, >0 = visée vers le haut. Incline la
-    /// direction du soleil dans le repère caméra (pas de source EXIF fiable —
-    /// 0 par défaut).
+    /// Tangage de la caméra : radians, >0 = visée vers le haut. Reconstruit
+    /// depuis l'`AccelerationVector` (MakerNote Apple) à l'import.
     var pitch: Double
+    /// Roulis de la caméra : radians, inclinaison latérale résiduelle (après
+    /// redressement EXIF). Reconstruit depuis l'`AccelerationVector`.
+    var roll: Double
 
     /// FOV vertical par défaut ≈ 53° (caméra grand-angle générique).
     static let defaultFieldOfView = 0.9273
@@ -31,7 +33,8 @@ struct Scene: Identifiable, Equatable, Sendable {
         date: Date,
         heading: Double = 0,
         fieldOfView: Double = Scene.defaultFieldOfView,
-        pitch: Double = 0
+        pitch: Double = 0,
+        roll: Double = 0
     ) {
         self.id = id
         self.title = title
@@ -41,5 +44,6 @@ struct Scene: Identifiable, Equatable, Sendable {
         self.heading = heading
         self.fieldOfView = fieldOfView
         self.pitch = pitch
+        self.roll = roll
     }
 }

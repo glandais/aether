@@ -29,21 +29,32 @@ extension CelestialPosition {
         return SIMD3(east, up, -north)
     }
 
-    /// Direction vers l'astre dans le repère de la caméra de la scène, en
-    /// tenant compte du cap (yaw) et du tangage (pitch). L'azimut est ramené
+    /// Direction vers l'astre dans le repère de la caméra de la scène, à partir
+    /// de son attitude (yaw + pitch + roll). L'azimut est d'abord ramené
     /// relativement à l'avant de la caméra (− `heading`), puis la direction est
-    /// inclinée de −`pitch` autour de l'axe droit (X) de la caméra.
-    func cameraDirection(heading: Double, pitch: Double) -> SIMD3<Float> {
+    /// tournée de −`roll` autour de l'axe avant (Z), enfin de −`pitch` autour de
+    /// l'axe droit (X).
+    func cameraDirection(heading: Double, pitch: Double, roll: Double = 0) -> SIMD3<Float> {
         let relative = CelestialPosition(body: body, azimuth: azimuth - heading, altitude: altitude)
-        let base = relative.worldDirection
+        var direction = relative.worldDirection
 
-        let angle = Float(-pitch)
-        let cosP = cos(angle)
-        let sinP = sin(angle)
-        return SIMD3(
-            base.x,
-            base.y * cosP - base.z * sinP,
-            base.y * sinP + base.z * cosP
+        // Roulis : rotation de −roll autour de l'axe avant Z.
+        let cosR = Float(cos(-roll))
+        let sinR = Float(sin(-roll))
+        direction = SIMD3(
+            direction.x * cosR - direction.y * sinR,
+            direction.x * sinR + direction.y * cosR,
+            direction.z
         )
+
+        // Tangage : rotation de −pitch autour de l'axe droit X.
+        let cosP = Float(cos(-pitch))
+        let sinP = Float(sin(-pitch))
+        direction = SIMD3(
+            direction.x,
+            direction.y * cosP - direction.z * sinP,
+            direction.y * sinP + direction.z * cosP
+        )
+        return direction
     }
 }

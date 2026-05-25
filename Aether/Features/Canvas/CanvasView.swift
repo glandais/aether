@@ -17,7 +17,10 @@ struct CanvasView: View {
     /// Direction du soleil dans le repère caméra : cap (Nord vs Sud) + tangage.
     private var sunDirection: SIMD3<Float> {
         astro.position(of: .sun, at: context.scene.coordinate, date: context.scene.date)
-            .cameraDirection(heading: context.scene.heading, pitch: context.scene.pitch)
+            .cameraDirection(
+                heading: context.scene.heading,
+                pitch: context.scene.pitch,
+                roll: context.scene.roll)
     }
 
     /// tan(FOV/2) vertical : cale la projection du ciel sur le zoom de la photo.

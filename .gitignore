@@ -1,3 +1,6 @@
+# Photos perso de test (EXIF GPS) — hors dépôt
+photos/
+
 # Xcode project — généré par XcodeGen depuis project.yml
 *.xcodeproj
 *.xcworkspace

@@ -46,6 +46,32 @@ struct PhotoImporterTests {
         #expect(metadata.date == nil)
     }
 
+    @Test("Tangage/roulis depuis de vrais AccelerationVector iPhone")
+    func attitudeFromRealAccelerationVectors() {
+        // Valeurs lues sur de vraies photos (dossier photos/).
+        // IMG_0793 — portrait (orientation 6), tenu droit, légèrement vers le haut.
+        let portrait = [-0.005157812, -0.9862852, 0.07311174]
+        let portraitPitch = PhotoImporter.pitch(fromAccelerationVector: portrait)!
+        let portraitRoll = PhotoImporter.roll(fromAccelerationVector: portrait, orientation: 6)!
+        #expect(abs(portraitPitch * 180 / .pi - 4.2) < 1.0)   // ≈ 4°
+        #expect(abs(portraitRoll) < 0.05)                      // tenu droit → ~0
+
+        // IMG_0792 — paysage (orientation 1), ultra grand-angle visé vers le haut.
+        let landscape = [-0.9252198, 0.010612, 0.367022]
+        let landscapePitch = PhotoImporter.pitch(fromAccelerationVector: landscape)!
+        let landscapeRoll = PhotoImporter.roll(fromAccelerationVector: landscape, orientation: 1)!
+        #expect(abs(landscapePitch * 180 / .pi - 21.6) < 1.5)  // ≈ 22°
+        #expect(abs(landscapeRoll) < 0.05)                      // tenu droit → ~0
+    }
+
+    @Test("Décalage EXIF +02:00 → fuseau correct")
+    func parsesUTCOffset() throws {
+        let timeZone = try #require(PhotoImporter.timeZone(fromOffset: "+02:00"))
+        #expect(timeZone.secondsFromGMT() == 7200)
+        let negative = try #require(PhotoImporter.timeZone(fromOffset: "-05:00"))
+        #expect(negative.secondsFromGMT() == -18000)
+    }
+
     @Test("Le FOV vertical dépend de l'orientation et du zoom")
     func fieldOfViewByOrientationAndZoom() {
         let focal = 26.0  // grand-angle typique de téléphone

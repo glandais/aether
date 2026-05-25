@@ -259,14 +259,18 @@ tests.
     `CanvasView`) à son ratio réel — aucune déformation paysage/portrait ; le
     FOV vertical dépend de l'orientation (24 mm vs 36 mm). Paysages curés =
     plein cadre (`displayAspect` nil).
-  - *Tangage* (`Scene.pitch`) → incline la direction du soleil dans le repère
-    caméra. Pas de source EXIF fiable → 0 par défaut.
-- Tests : EXIF GPS/horodatage, FOV par orientation/zoom, cap + tangage du soleil.
+  - *Attitude* (tangage + roulis) reconstruite depuis l'`AccelerationVector`
+    (MakerNote Apple : vecteur « haut » dans le repère appareil). Tangage =
+    `asin(z)` (robuste à l'orientation) ; roulis = `atan2(x, −y)` moins la
+    rotation cardinale EXIF. Conventions validées sur photos iPhone réelles
+    (orientations 1 et 6). Incline la direction du soleil (`cameraDirection`).
+  - *Horodatage* : `OffsetTimeOriginal` (ex. "+02:00") donne l'UTC exact ;
+    repli longitude sinon.
+- Tests : EXIF GPS/horodatage, décalage UTC, FOV orientation/zoom, cap +
+  tangage + roulis du soleil, attitude depuis de vrais `AccelerationVector`.
 
 ## Reste à faire
 
-- **Source du tangage** : `Scene.pitch` est câblé mais sans source (EXIF stills
-  ne le donne pas) → contrôle manuel ou attitude ARKit à brancher.
 - **Réglages** (`Features/Settings`) : ajuster lieu/heure (les photos les
   tirent de l'EXIF ; les paysages curés ont des presets).
 - **WeatherKit** comme source primaire (entitlement requis) derrière `WeatherService`.
