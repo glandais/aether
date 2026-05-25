@@ -19,6 +19,8 @@ struct CloudUniforms {
     float4 volumeHalfSize;  // xyz: world-space half-extents of the volume AABB
     float4 weather;         // x: coverage bias, y: density scale (from weather)
     float4 camera;          // x: tan(vertical FOV / 2) — matches the photo's zoom
+    float4 lightSun;        // xyz: sun colour × intensity (by altitude & exposure)
+    float4 lightAmbient;    // xyz: sky ambient fill
 };
 
 // Temporal amortization (step 7): each frame raymarches only the half-res
@@ -181,9 +183,10 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
     float stepSize = (tFar - tNear) / float(kViewSteps);
     float3 sunDir = normalize(u.sunDirection.xyz);
 
-    // Bright warm sun (compensates the 1/4π phase normalization) + cool sky fill.
-    const float3 sunColor = float3(6.5f, 4.7f, 3.4f);
-    const float3 skyAmbient = float3(0.34f, 0.40f, 0.55f);
+    // Scene-aware lighting: sun colour/intensity by altitude × the photo's
+    // exposure, and a matching sky ambient (resolved on the CPU).
+    float3 sunColor = u.lightSun.xyz;
+    float3 skyAmbient = u.lightAmbient.xyz;
     const int kScatterOctaves = 3;
 
     float cosTheta = dot(rd, sunDir);

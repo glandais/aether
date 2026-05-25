@@ -18,14 +18,26 @@ struct CanvasView: View {
     /// Attribution de la source météo réellement utilisée (nil avant résolution).
     @State private var attribution: WeatherAttribution?
 
+    /// Position apparente du soleil pour la scène (direction + altitude).
+    private var sunPosition: CelestialPosition {
+        astro.position(of: .sun, at: context.scene.coordinate, date: context.scene.date)
+    }
+
     /// Direction du soleil dans le repère caméra : cap (Nord vs Sud) + tangage.
     private var sunDirection: SIMD3<Float> {
-        astro.position(of: .sun, at: context.scene.coordinate, date: context.scene.date)
-            .cameraDirection(
-                heading: context.scene.heading,
-                pitch: context.scene.pitch,
-                roll: context.scene.roll)
+        sunPosition.cameraDirection(
+            heading: context.scene.heading,
+            pitch: context.scene.pitch,
+            roll: context.scene.roll)
     }
+
+    /// Éclairage selon la hauteur du soleil, calé sur l'exposition de la photo :
+    /// blanc et lumineux en plein jour, chaud et faible au crépuscule.
+    private var lighting: SkyLighting {
+        SkyLighting(sunAltitude: sunPosition.altitude)
+    }
+    private var sunColor: SIMD3<Float> { lighting.sunColor * context.skyExposure }
+    private var skyAmbient: SIMD3<Float> { lighting.ambient * context.skyExposure }
 
     /// tan(FOV/2) vertical : cale la projection du ciel sur le zoom de la photo.
     private var tanHalfFieldOfView: Float {
@@ -58,6 +70,8 @@ struct CanvasView: View {
         let metalView = MetalView(
             strokes: model.strokes,
             sunDirection: sunDirection,
+            sunColor: sunColor,
+            skyAmbient: skyAmbient,
             cloudParameters: cloudParameters,
             cameraTanHalfFov: tanHalfFieldOfView,
             landscape: context.landscape,

@@ -16,7 +16,8 @@ struct CuratedLandscape: Identifiable {
         // Paysages curés abstraits : plein cadre (displayAspect nil).
         return SceneContext(
             scene: scene, landscape: image,
-            depthMap: LandscapeFactory.depthMap(), displayAspect: nil)
+            depthMap: LandscapeFactory.depthMap(), displayAspect: nil,
+            skyExposure: SkyExposure.estimate(from: image))
     }
 }
 

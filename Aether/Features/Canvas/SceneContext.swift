@@ -13,4 +13,7 @@ struct SceneContext: Identifiable {
     /// Aspect (largeur/hauteur) auquel afficher le paysage sans déformation
     /// (lettrage). `nil` = plein cadre (paysages curés procéduraux abstraits).
     var displayAspect: CGFloat?
+    /// Exposition du paysage (≈ luminance, 0…1) : sert à caler la luminosité du
+    /// nuage sur celle de la photo (point blanc). Défaut neutre.
+    var skyExposure: Float = 0.6
 }

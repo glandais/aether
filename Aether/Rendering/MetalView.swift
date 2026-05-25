@@ -9,6 +9,8 @@ import SwiftUI
 struct MetalView: UIViewRepresentable {
     var strokes: [BrushStroke]
     var sunDirection: SIMD3<Float>
+    var sunColor: SIMD3<Float>
+    var skyAmbient: SIMD3<Float>
     var cloudParameters: CloudParameters
     var cameraTanHalfFov: Float
     var landscape: CGImage
@@ -43,6 +45,7 @@ struct MetalView: UIViewRepresentable {
         }
 
         renderer.updateSunDirection(sunDirection)
+        renderer.updateLighting(sunColor: sunColor, ambient: skyAmbient)
         renderer.updateCloudParameters(cloudParameters)
         renderer.updateFieldOfView(cameraTanHalfFov)
         renderer.updateStrokes(strokes)

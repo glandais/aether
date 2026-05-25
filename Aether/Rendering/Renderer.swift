@@ -14,6 +14,8 @@ private struct CloudUniforms {
     var volumeHalfSize: SIMD4<Float>
     var weather: SIMD4<Float>
     var camera: SIMD4<Float>  // x: tan(FOV vertical / 2)
+    var lightSun: SIMD4<Float>
+    var lightAmbient: SIMD4<Float>
 }
 
 /// Un « dab » de pinceau envoyé au compute shader. Doit correspondre à `Dab`
@@ -70,6 +72,11 @@ final class Renderer: NSObject, MTKViewDelegate {
     // tan(FOV vertical / 2) de la caméra de la scène (défaut ≈ 53°). Cale la
     // projection du ciel et le cadrage du volume sur le zoom de la photo.
     private var cameraTanHalfFov: Float = 0.5
+
+    // Éclairage résolu par la Feature (couleur soleil par altitude × exposition
+    // de la photo, et ambiance ciel). Valeurs de repli avant mise à jour.
+    private var sunColor = SIMD3<Float>(6.5, 4.7, 3.4)
+    private var skyAmbient = SIMD3<Float>(0.34, 0.40, 0.55)
     // Profondeur (distance caméra → centre du volume), pour le cadrage.
     private static let volumeDistance: Float = 5.0
 
@@ -174,6 +181,12 @@ final class Renderer: NSObject, MTKViewDelegate {
         cameraTanHalfFov = max(tanHalfFov, 0.02)
     }
 
+    /// Reçoit l'éclairage résolu (couleur soleil + ambiance) depuis la Feature.
+    func updateLighting(sunColor: SIMD3<Float>, ambient: SIMD3<Float>) {
+        self.sunColor = sunColor
+        self.skyAmbient = ambient
+    }
+
     /// Remplace le paysage de fond par l'image fournie (galerie ou photo).
     func setLandscape(_ image: CGImage) {
         let loader = MTKTextureLoader(device: device)
@@ -262,7 +275,9 @@ final class Renderer: NSObject, MTKViewDelegate {
             volumeCenter: SIMD4(0.0, 0.0, -Renderer.volumeDistance, 0.0),
             volumeHalfSize: SIMD4(volumeHalfHeight * aspect, volumeHalfHeight, 0.9, 0.0),
             weather: SIMD4(cloudParameters.coverageBias, cloudParameters.densityScale, 0.0, 0.0),
-            camera: SIMD4(cameraTanHalfFov, 0.0, 0.0, 0.0)
+            camera: SIMD4(cameraTanHalfFov, 0.0, 0.0, 0.0),
+            lightSun: SIMD4(sunColor.x, sunColor.y, sunColor.z, 0.0),
+            lightAmbient: SIMD4(skyAmbient.x, skyAmbient.y, skyAmbient.z, 0.0)
         )
         var temporal = CloudTemporal(activeIndex: Renderer.activeOrder[frameIndex % 4])
 

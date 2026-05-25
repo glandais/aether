@@ -62,7 +62,8 @@ struct PhotoImporter {
         let depthMap = try? await depthService.estimateDepth(for: oriented)
         return SceneContext(
             scene: scene, landscape: oriented, depthMap: depthMap,
-            displayAspect: CGFloat(aspect))
+            displayAspect: CGFloat(aspect),
+            skyExposure: SkyExposure.estimate(from: oriented))
     }
 
     /// FOV vertical depuis la focale 35 mm. Le cadre 24×36 a 36 mm sur son grand

@@ -269,6 +269,20 @@ tests.
 - Tests : EXIF GPS/horodatage, décalage UTC, FOV orientation/zoom, cap +
   tangage + roulis du soleil, attitude depuis de vrais `AccelerationVector`.
 
+## Éclairage selon la scène — **terminé**
+
+Le nuage s'éclaire selon la scène, plus de constantes crépusculaires figées :
+- `SkyLighting(sunAltitude:)` (Domain) : couleur/intensité du soleil par hauteur
+  (chaud + faible à l'horizon → blanc + intense en hauteur) ; ambiance ciel
+  claire et presque blanche le jour (porte la « blancheur » du corps du nuage),
+  sombre la nuit, avec une lueur chaude au crépuscule/aube.
+- `SkyExposure.estimate(from:)` (Feature) : luminance du paysage → point blanc.
+  `CanvasView` multiplie l'éclairage par cette exposition (`SceneContext.skyExposure`)
+  → le nuage est blanc et lumineux en plein jour, sombre et chaud au crépuscule,
+  calé sur la photo. Résolu côté Feature, passé en uniformes au `Renderer`.
+- Vérifié : photo de jour → nuage blanc (comme les vrais) ; crépuscule curé →
+  nuage chaud et tamisé.
+
 ## WeatherKit source primaire — **terminé**
 
 - `WeatherService` renvoie un `WeatherReport` (snapshot + `WeatherAttribution`).
