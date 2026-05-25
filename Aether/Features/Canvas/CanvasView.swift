@@ -2,28 +2,34 @@ import Foundation
 import SwiftUI
 import simd
 
-/// Hôte plein écran du canvas de rendu volumétrique. L'utilisateur peint des
-/// silhouettes de nuages au doigt ; le `Renderer` en fait un volume de densité.
+/// Hôte plein écran du canvas de rendu volumétrique, pour un paysage donné.
+/// L'utilisateur peint des silhouettes de nuages au doigt ; le `Renderer` en
+/// fait un volume de densité, éclairé selon le lieu/instant de la scène.
 struct CanvasView: View {
-    @State private var model = CanvasModel()
+    let context: SceneContext
 
-    /// Scène par défaut : Paris au crépuscule (heure UTC). Le choix du lieu et
-    /// de l'heure passera par les réglages (étape future).
-    private static let defaultScene = Scene(
-        title: "Paris",
-        coordinate: GeoCoordinate(latitude: 48.8566, longitude: 2.3522),
-        date: makeDefaultDate()
-    )
+    @State private var model = CanvasModel()
+    @State private var cloudParameters = CloudParameters.neutral
     private let astro = SwiftAAAstroService()
     private let weather = OpenMeteoWeatherService()
 
-    /// Paramètres de nuage dérivés de la météo réelle (résolus en tâche async).
-    @State private var cloudParameters = CloudParameters.neutral
-
-    /// Direction du soleil résolue depuis l'`AstroService` pour la scène.
+    /// Direction du soleil résolue depuis l'`AstroService`, exprimée
+    /// relativement au cap de la caméra (une photo prise vers le Sud place le
+    /// soleil à l'opposé d'une photo prise vers le Nord).
     private var sunDirection: SIMD3<Float> {
-        astro.position(of: .sun, at: Self.defaultScene.coordinate, date: Self.defaultScene.date)
-            .worldDirection
+        let position = astro.position(
+            of: .sun, at: context.scene.coordinate, date: context.scene.date)
+        let cameraRelative = CelestialPosition(
+            body: .sun,
+            azimuth: position.azimuth - context.scene.heading,
+            altitude: position.altitude
+        )
+        return cameraRelative.worldDirection
+    }
+
+    /// tan(FOV/2) vertical : cale la projection du ciel sur le zoom de la photo.
+    private var tanHalfFieldOfView: Float {
+        Float(tan(context.scene.fieldOfView / 2))
     }
 
     var body: some View {
@@ -32,7 +38,11 @@ struct CanvasView: View {
                 MetalView(
                     strokes: model.strokes,
                     sunDirection: sunDirection,
-                    cloudParameters: cloudParameters
+                    cloudParameters: cloudParameters,
+                    cameraTanHalfFov: tanHalfFieldOfView,
+                    landscape: context.landscape,
+                    depthMap: context.depthMap,
+                    contentID: context.id
                 )
                 .contentShape(Rectangle())
                 .gesture(paintGesture(in: geometry.size))
@@ -44,15 +54,15 @@ struct CanvasView: View {
             }
         }
         .ignoresSafeArea()
-        .task { await loadWeather() }
+        .task(id: context.id) { await loadWeather() }
     }
 
-    /// Récupère la météo réelle pour la scène ; en cas d'échec (réseau,
-    /// indisponibilité), on conserve des paramètres neutres.
+    /// Récupère la météo réelle pour la scène ; en cas d'échec, on conserve des
+    /// paramètres neutres.
     private func loadWeather() async {
         do {
             let snapshot = try await weather.snapshot(
-                at: Self.defaultScene.coordinate, date: Self.defaultScene.date)
+                at: context.scene.coordinate, date: context.scene.date)
             cloudParameters = CloudParameters(weather: snapshot)
         } catch {
             cloudParameters = .neutral
@@ -89,20 +99,6 @@ struct CanvasView: View {
                 .background(.ultraThinMaterial, in: Capsule())
         }
         .buttonStyle(.plain)
-    }
-}
-
-private extension CanvasView {
-    static func makeDefaultDate() -> Date {
-        var components = DateComponents()
-        components.year = 2026
-        components.month = 5
-        components.day = 25
-        components.hour = 19
-        components.minute = 15
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC") ?? .gmt
-        return calendar.date(from: components) ?? Date()
     }
 }
 

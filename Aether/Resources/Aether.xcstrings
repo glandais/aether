@@ -35,6 +35,24 @@
           }
         }
       }
+    },
+    "gallery.import" : {
+      "comment" : "Bouton important une photo personnelle.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import a photo"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Importer une photo"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

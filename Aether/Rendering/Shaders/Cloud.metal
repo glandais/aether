@@ -18,6 +18,7 @@ struct CloudUniforms {
     float4 volumeCenter;    // xyz: world-space center of the density volume
     float4 volumeHalfSize;  // xyz: world-space half-extents of the volume AABB
     float4 weather;         // x: coverage bias, y: density scale (from weather)
+    float4 camera;          // x: tan(vertical FOV / 2) — matches the photo's zoom
 };
 
 // Temporal amortization (step 7): each frame raymarches only the half-res
@@ -152,10 +153,11 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
         return history.read(px);
     }
 
-    // Fixed pinhole camera at the origin looking down -Z.
+    // Pinhole camera at the origin looking down -Z, with the photo's vertical
+    // FOV (zoom). `ndc.x` scaled by aspect for square pixels.
     float2 ndc = float2(in.ndc.x * u.aspect, in.ndc.y);
     float3 ro = float3(0.0f, 0.0f, 0.0f);
-    float3 rd = normalize(float3(ndc * 0.5f, -1.0f));  // ~53° vertical FOV
+    float3 rd = normalize(float3(ndc * u.camera.x, -1.0f));
 
     float3 boxMin = u.volumeCenter.xyz - u.volumeHalfSize.xyz;
     float3 boxMax = u.volumeCenter.xyz + u.volumeHalfSize.xyz;

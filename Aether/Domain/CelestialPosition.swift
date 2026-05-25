@@ -15,9 +15,10 @@ struct CelestialPosition: Equatable, Sendable {
 }
 
 extension CelestialPosition {
-    /// Direction unitaire vers l'astre, en espace monde Aether. Convention :
-    /// la caméra regarde le Nord → -Z = Nord, +X = Est, +Y = haut. Type pur,
-    /// consommé par le Rendering via `Lighting` (pas de dépendance Services).
+    /// Direction unitaire vers l'astre, en espace monde Aether. Ici `azimuth`
+    /// est mesuré **depuis l'avant de la caméra** (et non depuis le Nord) :
+    /// l'appelant y soustrait le cap de la scène. Convention monde : -Z = avant,
+    /// +X = droite, +Y = haut. Type pur (pas de dépendance Services).
     var worldDirection: SIMD3<Float> {
         let azimuthRad = Float(azimuth)
         let altitudeRad = Float(altitude)

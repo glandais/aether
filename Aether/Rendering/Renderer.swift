@@ -13,6 +13,7 @@ private struct CloudUniforms {
     var volumeCenter: SIMD4<Float>
     var volumeHalfSize: SIMD4<Float>
     var weather: SIMD4<Float>
+    var camera: SIMD4<Float>  // x: tan(FOV vertical / 2)
 }
 
 /// Un « dab » de pinceau envoyé au compute shader. Doit correspondre à `Dab`
@@ -40,8 +41,10 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let cloudPipeline: MTLRenderPipelineState
     private let compositePipeline: MTLRenderPipelineState
     private let paintPipeline: MTLComputePipelineState
-    private let landscapeTexture: MTLTexture
-    private let depthTexture: MTLTexture
+    // Paysage + depth map : placeholders au départ, remplacés par la Feature
+    // (galerie curée ou photo importée) via `setLandscape` / `setDepthMap`.
+    private var landscapeTexture: MTLTexture
+    private var depthTexture: MTLTexture
     private let noiseTexture: MTLTexture
     private let densityVolume: MTLTexture
     private let sampler: MTLSamplerState
@@ -63,6 +66,12 @@ final class Renderer: NSObject, MTKViewDelegate {
     // Paramètres météo (étape 9), résolus par la Feature depuis le
     // `WeatherService`. Neutres avant la première mise à jour.
     private var cloudParameters = CloudParameters.neutral
+
+    // tan(FOV vertical / 2) de la caméra de la scène (défaut ≈ 53°). Cale la
+    // projection du ciel et le cadrage du volume sur le zoom de la photo.
+    private var cameraTanHalfFov: Float = 0.5
+    // Profondeur (distance caméra → centre du volume), pour le cadrage.
+    private static let volumeDistance: Float = 5.0
 
     // Résolution du volume de densité peint. La forme y est lisse (le détail
     // vient du bruit Perlin-Worley), donc une résolution modeste suffit.
@@ -160,6 +169,54 @@ final class Renderer: NSObject, MTKViewDelegate {
         cloudParameters = parameters
     }
 
+    /// Reçoit tan(FOV vertical / 2) de la caméra de la scène (zoom de la photo).
+    func updateFieldOfView(_ tanHalfFov: Float) {
+        cameraTanHalfFov = max(tanHalfFov, 0.02)
+    }
+
+    /// Remplace le paysage de fond par l'image fournie (galerie ou photo).
+    func setLandscape(_ image: CGImage) {
+        let loader = MTKTextureLoader(device: device)
+        if let texture = try? loader.newTexture(cgImage: image, options: [.SRGB: false]) {
+            landscapeTexture = texture
+        }
+    }
+
+    /// Remplace la depth map par celle résolue (LiDAR / Depth Anything). La
+    /// profondeur relative [0,1] (0 = proche, 1 = lointain) est mappée en
+    /// distance scène : masque d'occlusion tolérant (BIBLIO §4), le nuage
+    /// n'apparaît que dans le ciel (zones les plus lointaines).
+    func setDepthMap(_ depthMap: DepthMap) {
+        guard depthMap.width > 0, depthMap.height > 0,
+              depthMap.values.count == depthMap.width * depthMap.height else {
+            return
+        }
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .r32Float, width: depthMap.width, height: depthMap.height, mipmapped: false)
+        descriptor.usage = [.shaderRead]
+        descriptor.storageMode = .shared
+        guard let texture = device.makeTexture(descriptor: descriptor) else { return }
+
+        // d ≤ skyLow → relief proche (occlut) ; d ≥ skyHigh → ciel (lointain).
+        let skyLow: Float = 0.55
+        let skyHigh: Float = 0.78
+        let nearDistance: Float = 2.0
+        let far: Float = 1000.0
+        let sceneDepths = depthMap.values.map { d -> Float in
+            let t = Renderer.smoothstep(skyLow, skyHigh, d)
+            return nearDistance + (far - nearDistance) * t
+        }
+        sceneDepths.withUnsafeBytes { raw in
+            texture.replace(
+                region: MTLRegionMake2D(0, 0, depthMap.width, depthMap.height),
+                mipmapLevel: 0,
+                withBytes: raw.baseAddress!,
+                bytesPerRow: depthMap.width * MemoryLayout<Float>.stride
+            )
+        }
+        depthTexture = texture
+    }
+
     /// Reçoit les traits du canvas (coord. normalisées) et repeint le volume.
     func updateStrokes(_ strokes: [BrushStroke]) {
         var dabs: [Dab] = []
@@ -193,16 +250,19 @@ final class Renderer: NSObject, MTKViewDelegate {
         let historyTarget = cloudTargets[(frameIndex + 1) % 2]
 
         let aspect = Float(fullWidth) / Float(fullHeight)
+        let volumeHalfHeight = Renderer.volumeDistance * cameraTanHalfFov
         var uniforms = CloudUniforms(
             resolution: SIMD2(Float(halfWidth), Float(halfHeight)),
             time: Float(CACurrentMediaTime() - startTime),
             aspect: aspect,
             // Direction du soleil résolue par l'AstroService (étape 8).
             sunDirection: SIMD4(sunDirection.x, sunDirection.y, sunDirection.z, 0.0),
-            // Volume cadré sur le frustum visible à la profondeur z = -5.
-            volumeCenter: SIMD4(0.0, 0.0, -5.0, 0.0),
-            volumeHalfSize: SIMD4(2.5 * aspect, 2.5, 0.9, 0.0),
-            weather: SIMD4(cloudParameters.coverageBias, cloudParameters.densityScale, 0.0, 0.0)
+            // Volume cadré sur le frustum visible à la profondeur du volume,
+            // selon le FOV de la caméra (zoom) et l'aspect de l'écran.
+            volumeCenter: SIMD4(0.0, 0.0, -Renderer.volumeDistance, 0.0),
+            volumeHalfSize: SIMD4(volumeHalfHeight * aspect, volumeHalfHeight, 0.9, 0.0),
+            weather: SIMD4(cloudParameters.coverageBias, cloudParameters.densityScale, 0.0, 0.0),
+            camera: SIMD4(cameraTanHalfFov, 0.0, 0.0, 0.0)
         )
         var temporal = CloudTemporal(activeIndex: Renderer.activeOrder[frameIndex % 4])
 

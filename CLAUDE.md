@@ -233,17 +233,41 @@ Référence : Hillaire 2016, Open-Meteo (voir `BIBLIO.md`).
 
 ## Pipeline de rendu — **complet** (étapes 1→9)
 
-Toutes les étapes du pipeline sont implémentées et vérifiées visuellement /
-par tests. Reste, hors pipeline (features applicatives) :
+Toutes les étapes du pipeline sont implémentées et vérifiées visuellement / par
+tests.
 
-- **Galerie curée + import photo** (`Features/Gallery`, `Features/PhotoImport`) :
-  remplacer le paysage placeholder et alimenter la vraie **depth map**
-  (LiDAR/ARKit ou Depth Anything via `DepthService`) à la place de la depth
-  placeholder de l'étape 6
-- **Réglages** (`Features/Settings`) : choix du lieu et de l'heure (au lieu de la
-  scène Paris fixe) → pilote `AstroService` / `WeatherService`
-- **WeatherKit** comme source primaire (entitlement requis) derrière `WeatherService`
-- **Éclairage lunaire** nocturne (palette froide) quand le Soleil est sous l'horizon
-- **Profilage perf sur device réel** (l'étape 7 n'a été vérifiée que
-  structurellement + parité visuelle simulateur)
-- Pinceau : repeinte incrémentale du volume, sliders (rayon/adoucissement)
+## Galerie + import photo — **terminé**
+
+- **Navigation** : `RootView` → `GalleryView` (paysages curés + import) →
+  `CanvasView(context:)`. Un `SceneContext` (scène + image + depth map) circule
+  de la Feature vers le `Renderer` (qui expose `setLandscape` / `setDepthMap` :
+  Rendering ne dépend toujours que du Domain).
+- **Galerie curée** : `LandscapeFactory` génère des paysages *procéduraux*
+  (dégradés atmosphériques) + depth map synthétique. Presets dans
+  `CuratedLandscape.catalog` (lieu + heure → astro/météo).
+- **Import photo** (`PhotoImporter`) : `PhotosPicker` → décodage + orientation
+  EXIF, métadonnées EXIF (GPS, horodatage, cap, focale) → `Scene`, profondeur
+  via `CoreMLDepthService`.
+- **Profondeur réelle** : `CoreMLDepthService` (acteur) exécute Depth Anything V2
+  Small F16 (`Resources/Models/`, Apache-2.0) → `DepthMap` Domain ; mappée en
+  masque d'occlusion tolérant (BIBLIO §4) dans `setDepthMap`.
+- **Caméra calée sur la photo** : le cap EXIF (`GPSImgDirection`) oriente le
+  soleil relativement à la scène ; le FOV (focale 35 mm équiv.) pilote
+  l'écartement des rayons et le cadrage du volume.
+- Tests : extraction EXIF GPS/horodatage (`PhotoImporterTests`).
+
+## Reste à faire
+
+- **Orientation / aspect** : la photo est *étirée* plein écran (portrait). Un
+  cliché paysage est donc déformé, et le FOV vertical est calculé sans tenir
+  compte de l'orientation du capteur. À faire : affichage *aspect-fit*
+  (letterbox) + FOV par axe selon paysage/portrait + tangage (pitch) caméra.
+  C'est un chantier *layout* couplé (la caméra du nuage doit partager le même
+  sous-rectangle que la photo) — prochaine étape dédiée.
+- **Réglages** (`Features/Settings`) : ajuster lieu/heure (les photos les
+  tirent de l'EXIF ; les paysages curés ont des presets).
+- **WeatherKit** comme source primaire (entitlement requis) derrière `WeatherService`.
+- **LiDAR / ARKit** comme source de profondeur alternative derrière `DepthService`.
+- **Éclairage lunaire** nocturne (palette froide) quand le Soleil est sous l'horizon.
+- **Profilage perf sur device réel** (étape 7 vérifiée structurellement seulement).
+- Pinceau : repeinte incrémentale du volume, sliders (rayon/adoucissement).
