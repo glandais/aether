@@ -37,6 +37,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.glandais.aether
         PRODUCT_NAME: Aether
+        CODE_SIGN_ENTITLEMENTS: Aether/Aether.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: YES
         # Lancement plein écran sans launch storyboard (étape 1).
