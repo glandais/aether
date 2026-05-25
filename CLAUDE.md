@@ -175,6 +175,19 @@ l'écran).
 
 Référence : Hillaire 2016, Patapom, Wallis, Scratchapixel (voir `BIBLIO.md`).
 
-**Prochaine cible — étape 6 :** composition avec la depth map du paysage —
-occlusion correcte des nuages passant derrière les reliefs. Chaque étape doit
-rester visuellement vérifiable avant la suivante.
+**Étape 6 (composition avec depth map) — terminée.**
+- [x] Depth map placeholder du paysage (`makeDepthTexture`) : ciel lointain,
+  relief de sol proche descendant vers l'écran
+- [x] `Cloud.metal` borne le raymarch à la profondeur scène (early ray
+  termination) → le nuage ne s'accumule pas derrière le relief
+- [x] Soft particles : fondu de la densité à l'approche du relief (pas d'arête
+  d'intersection franche)
+- [x] Vérifiée visuellement sur simulateur (nuage occlus par l'horizon)
+
+Référence : ARKit sceneDepth, Depth Anything V2, soft particles (Wolfire/Flax),
+Hillaire 2016 (voir `BIBLIO.md` §4). La vraie profondeur (LiDAR / Depth Anything
+via `DepthService`) remplacera la depth map placeholder à l'import photo.
+
+**Prochaine cible — étape 7 :** raymarching demi-résolution + reprojection
+temporelle pour la perf sur device bas/moyen de gamme. Chaque étape doit rester
+visuellement vérifiable avant la suivante.

@@ -33,6 +33,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let cloudPipeline: MTLRenderPipelineState
     private let paintPipeline: MTLComputePipelineState
     private let landscapeTexture: MTLTexture
+    private let depthTexture: MTLTexture
     private let noiseTexture: MTLTexture
     private let densityVolume: MTLTexture
     private let sampler: MTLSamplerState
@@ -81,6 +82,11 @@ final class Renderer: NSObject, MTKViewDelegate {
             return nil
         }
         landscapeTexture = texture
+
+        guard let depth = Renderer.makeDepthTexture(device: device) else {
+            return nil
+        }
+        depthTexture = depth
 
         let samplerDescriptor = MTLSamplerDescriptor()
         samplerDescriptor.minFilter = .linear
@@ -159,6 +165,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<CloudUniforms>.stride, index: 0)
         encoder.setFragmentTexture(densityVolume, index: 0)
         encoder.setFragmentTexture(noiseTexture, index: 1)
+        encoder.setFragmentTexture(depthTexture, index: 2)
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
 
         encoder.endEncoding()
@@ -200,6 +207,11 @@ final class Renderer: NSObject, MTKViewDelegate {
     }
 
     // MARK: - Construction
+
+    private static func smoothstep(_ edge0: Float, _ edge1: Float, _ x: Float) -> Float {
+        let t = min(max((x - edge0) / (edge1 - edge0), 0), 1)
+        return t * t * (3 - 2 * t)
+    }
 
     private enum Blend {
         case none
@@ -281,6 +293,49 @@ final class Renderer: NSObject, MTKViewDelegate {
         descriptor.usage = [.shaderRead, .shaderWrite]
         descriptor.storageMode = .private
         return device.makeTexture(descriptor: descriptor)
+    }
+
+    /// Depth map placeholder du paysage (étape 6) : distance scène le long du
+    /// rayon, par ligne d'écran. Ciel = lointain (le nuage passe devant) ; bande
+    /// de sol en bas = proche et se rapprochant vers le bas (occlut le nuage).
+    /// Remplacé plus tard par la vraie profondeur (ARKit / Depth Anything via
+    /// `DepthService`).
+    private static func makeDepthTexture(device: MTLDevice) -> MTLTexture? {
+        let width = 1
+        let height = 512
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .r32Float, width: width, height: height, mipmapped: false)
+        descriptor.usage = [.shaderRead]
+        descriptor.storageMode = .shared
+        guard let texture = device.makeTexture(descriptor: descriptor) else {
+            return nil
+        }
+
+        // Le ciel est lointain (le nuage, vers z = -5 ≈ t 5.5, passe devant) ;
+        // la bande de sol est un relief proche qui occlut le nuage. Le sol
+        // descend en douceur à travers la profondeur du nuage → coupe souple.
+        let far: Float = 1000.0
+        let ridgeStart: Float = 0.50  // début du relief en coord. écran (0 = haut)
+        let ridgeNear: Float = 1.4    // profondeur au bas de l'écran (très proche)
+        let ridgeFar: Float = 6.0     // profondeur au sommet du relief
+        var depths = [Float](repeating: far, count: width * height)
+        for row in 0..<height {
+            let v = Float(row) / Float(height - 1)  // 0 = haut (ciel), 1 = bas (sol)
+            if v < ridgeStart {
+                depths[row] = far
+            } else {
+                let t = Renderer.smoothstep(ridgeStart, 0.95, v)
+                depths[row] = ridgeFar + (ridgeNear - ridgeFar) * t
+            }
+        }
+
+        texture.replace(
+            region: MTLRegionMake2D(0, 0, width, height),
+            mipmapLevel: 0,
+            withBytes: depths,
+            bytesPerRow: width * MemoryLayout<Float>.stride
+        )
+        return texture
     }
 
     /// Paysage placeholder : dégradé vertical crépusculaire (sol sombre →
