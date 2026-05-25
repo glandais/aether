@@ -136,6 +136,16 @@ Référence : Schneider 2015, Häggström, Quilez, Scratchapixel
 (voir `BIBLIO.md`). La fonction de phase Henyey-Greenstein, le *powder* et le
 scattering atmosphérique sont volontairement reportés à l'étape 5.
 
-**Prochaine cible — étape 3 :** remplacer le bruit analytique par des volume
-textures 3D (Perlin-Worley) précomputées en compute shader. Chaque étape doit
+**Étape 3 (volume textures 3D Perlin-Worley) — terminée.**
+- [x] `CloudNoise.metal` : compute kernel bakant une texture 3D 128³ tileable
+  (R = Perlin-Worley, GBA = Worley à fréquences croissantes)
+- [x] Précompute unique au lancement (`makeNoiseTexture`, `waitUntilCompleted`)
+- [x] `Cloud.metal` échantillonne la texture 3D (sampler repeat) au lieu du fBm
+  analytique ; base confinée par la sphère + érosion Worley des bords
+- [x] Vérifiée visuellement sur simulateur (iPhone 17 Pro)
+
+Référence : Schneider 2015/2017, Häggström, Bitsquid (voir `BIBLIO.md`).
+
+**Prochaine cible — étape 4 :** input du pinceau (canvas 2D) → champ de densité
+écrit dans le volume, en remplacement de la sphère analytique. Chaque étape doit
 rester visuellement vérifiable avant la suivante.

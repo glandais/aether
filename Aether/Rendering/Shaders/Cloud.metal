@@ -1,12 +1,14 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// Pipeline step 2: raymarch a single ANALYTIC cloud — a noise-eroded sphere lit
-// by a fixed directional sun. View-ray transmittance follows Beer-Lambert
-// (Scratchapixel, "ray marching: get it right"); the density model and the
-// short light-march toward the sun follow Schneider 2015 (Nubis) / Häggström.
-// The full Henyey-Greenstein phase function, powder term and atmospheric
-// scattering are deferred to step 5.
+// Pipeline step 3: raymarch a single cloud whose density now comes from a
+// precomputed 3D Perlin-Worley volume texture (see CloudNoise.metal) instead of
+// in-shader analytic fBm. A spherical falloff still confines the cloud; the
+// texture supplies the billowy base (R) and the Worley detail (GBA) that erodes
+// the edges, following Schneider 2015 / Häggström. View-ray transmittance is
+// Beer-Lambert (Scratchapixel); the light-march toward a fixed sun gives
+// self-shadowing. Henyey-Greenstein phase, powder and atmospheric scattering
+// remain deferred to step 5.
 
 struct CloudUniforms {
     float2 resolution;
@@ -20,80 +22,53 @@ struct CloudInOut {
     float2 ndc;           // clip-space xy, interpolated across the screen
 };
 
-// --- Procedural value noise + fBm (Quilez) -------------------------------
-
-static inline float hash13(float3 p) {
-    p = fract(p * 0.3183099f + float3(0.1f, 0.2f, 0.3f));
-    p *= 17.0f;
-    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
-}
-
-// Trilinearly interpolated value noise on the integer lattice.
-static inline float valueNoise(float3 x) {
-    float3 i = floor(x);
-    float3 f = fract(x);
-    f = f * f * (3.0f - 2.0f * f);  // smoothstep weights
-
-    float n000 = hash13(i + float3(0.0f, 0.0f, 0.0f));
-    float n100 = hash13(i + float3(1.0f, 0.0f, 0.0f));
-    float n010 = hash13(i + float3(0.0f, 1.0f, 0.0f));
-    float n110 = hash13(i + float3(1.0f, 1.0f, 0.0f));
-    float n001 = hash13(i + float3(0.0f, 0.0f, 1.0f));
-    float n101 = hash13(i + float3(1.0f, 0.0f, 1.0f));
-    float n011 = hash13(i + float3(0.0f, 1.0f, 1.0f));
-    float n111 = hash13(i + float3(1.0f, 1.0f, 1.0f));
-
-    float nx00 = mix(n000, n100, f.x);
-    float nx10 = mix(n010, n110, f.x);
-    float nx01 = mix(n001, n101, f.x);
-    float nx11 = mix(n011, n111, f.x);
-    float nxy0 = mix(nx00, nx10, f.y);
-    float nxy1 = mix(nx01, nx11, f.y);
-    return mix(nxy0, nxy1, f.z);
-}
-
-// Fractal Brownian motion: layered octaves of value noise.
-static inline float fbm(float3 p) {
-    float sum = 0.0f;
-    float amplitude = 0.5f;
-    float frequency = 1.0f;
-    for (int i = 0; i < 4; ++i) {
-        sum += amplitude * valueNoise(p * frequency);
-        frequency *= 2.02f;
-        amplitude *= 0.5f;
-    }
-    return sum;
-}
-
-// --- Cloud density -------------------------------------------------------
-
 constant float3 kCloudCenter = float3(0.0f, 0.7f, -5.0f);
 constant float  kCloudRadius = 1.0f;
+constant float  kNoiseScale = 0.42f;   // world units → texture-space frequency
 
-// Analytic density: a spherical falloff eroded by fBm. The erosion is weighted
-// toward the boundary (Schneider 2015) so the core stays dense while the edges
-// break into wisps. Returns [0, 1].
-static inline float cloudDensity(float3 p, float time) {
-    float dist = length(p - kCloudCenter);
-    float shape = saturate(1.0f - dist / kCloudRadius);
-
-    // Higher frequency than the cloud radius → fluffy detail. Slow drift gives
-    // the cloud a contemplative, breathing quality.
-    float3 q = p * 2.8f + float3(time * 0.03f, time * 0.008f, time * 0.015f);
-    float detail = fbm(q);
-
-    // Erode more where `shape` is small (edges), little at the core.
-    float erosion = (1.0f - detail) * mix(0.95f, 0.12f, shape);
-    float density = saturate(shape - erosion);
-    return density;
-}
-
-// --- Raymarch ------------------------------------------------------------
-
-constant float kSigma = 11.0f;        // extinction coefficient
+constant float kSigma = 11.0f;         // extinction coefficient
 constant int   kViewSteps = 64;
 constant int   kLightSteps = 6;
 constant float kLightStep = 0.15f;
+
+// Linear, repeating sampler so the tileable noise wraps without seams.
+constexpr sampler noiseSampler(address::repeat, filter::linear, mip_filter::none);
+
+static inline float remap(float v, float l0, float h0, float l1, float h1) {
+    return l1 + (v - l0) * (h1 - l1) / (h0 - l0);
+}
+
+// Density from the spherical shape eroded by the 3D noise texture. Returns [0,1].
+static inline float cloudDensity(float3 p, float time, texture3d<float> noise) {
+    float dist = length(p - kCloudCenter);
+    float shape = saturate(1.0f - dist / kCloudRadius);
+    if (shape <= 0.0f) {
+        return 0.0f;
+    }
+
+    // Slow drift gives the cloud a contemplative, breathing quality.
+    float3 uvw = (p - kCloudCenter) * kNoiseScale + 0.5f
+               + float3(time * 0.01f, time * 0.004f, time * 0.006f);
+    float4 n = noise.sample(noiseSampler, uvw);
+
+    // Base: Perlin-Worley confined by the spherical coverage.
+    float base = saturate(remap(n.r, 1.0f - shape, 1.0f, 0.0f, 1.0f));
+
+    // Detail: Worley FBM erodes the base, more strongly toward the edges.
+    float detail = n.g * 0.625f + n.b * 0.25f + n.a * 0.125f;
+    float density = remap(base, detail * 0.55f, 1.0f, 0.0f, 1.0f);
+    return saturate(density);
+}
+
+// Beer-Lambert transmittance toward the sun (self-shadowing).
+static inline float lightTransmittance(float3 p, float3 sunDir, float time, texture3d<float> noise) {
+    float opticalDepth = 0.0f;
+    for (int i = 0; i < kLightSteps; ++i) {
+        float3 q = p + sunDir * (float(i) + 0.5f) * kLightStep;
+        opticalDepth += cloudDensity(q, time, noise) * kLightStep;
+    }
+    return exp(-opticalDepth * kSigma);
+}
 
 // Intersect a ray with the cloud's bounding sphere. Returns near/far t in .xy,
 // .z < 0 when the ray misses.
@@ -107,16 +82,6 @@ static inline float3 intersectBounds(float3 ro, float3 rd) {
     }
     h = sqrt(h);
     return float3(-b - h, -b + h, 1.0f);
-}
-
-// Beer-Lambert transmittance toward the sun (self-shadowing).
-static inline float lightTransmittance(float3 p, float3 sunDir, float time) {
-    float opticalDepth = 0.0f;
-    for (int i = 0; i < kLightSteps; ++i) {
-        float3 q = p + sunDir * (float(i) + 0.5f) * kLightStep;
-        opticalDepth += cloudDensity(q, time) * kLightStep;
-    }
-    return exp(-opticalDepth * kSigma);
 }
 
 vertex CloudInOut cloud_vertex(uint vertexID [[vertex_id]]) {
@@ -135,7 +100,8 @@ vertex CloudInOut cloud_vertex(uint vertexID [[vertex_id]]) {
 // Outputs PREMULTIPLIED color + coverage alpha, composited over the landscape
 // with (one, oneMinusSourceAlpha) blending.
 fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
-                               constant CloudUniforms &u [[buffer(0)]]) {
+                               constant CloudUniforms &u [[buffer(0)]],
+                               texture3d<float> noise [[texture(0)]]) {
     // Fixed pinhole camera at the origin looking down -Z.
     float2 ndc = float2(in.ndc.x * u.aspect, in.ndc.y);
     float3 ro = float3(0.0f, 0.0f, 0.0f);
@@ -161,9 +127,9 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
         float t = tNear + (float(i) + 0.5f) * stepSize;
         float3 p = ro + rd * t;
 
-        float density = cloudDensity(p, u.time);
+        float density = cloudDensity(p, u.time, noise);
         if (density > 0.001f) {
-            float light = lightTransmittance(p, sunDir, u.time);
+            float light = lightTransmittance(p, sunDir, u.time, noise);
             float3 luminance = sunColor * light + skyAmbient;
 
             float extinction = density * kSigma * stepSize;

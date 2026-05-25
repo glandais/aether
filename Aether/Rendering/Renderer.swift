@@ -20,6 +20,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let backgroundPipeline: MTLRenderPipelineState
     private let cloudPipeline: MTLRenderPipelineState
     private let landscapeTexture: MTLTexture
+    private let noiseTexture: MTLTexture
     private let sampler: MTLSamplerState
     private let startTime = CACurrentMediaTime()
     private let log = Logger(subsystem: "io.github.glandais.aether", category: "Renderer")
@@ -65,6 +66,11 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
         self.sampler = sampler
 
+        guard let noise = Renderer.makeNoiseTexture(device: device, library: library, queue: queue) else {
+            return nil
+        }
+        noiseTexture = noise
+
         self.commandQueue = queue
         super.init()
         log.debug("Renderer initialisé sur \(device.name, privacy: .public)")
@@ -101,6 +107,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         )
         encoder.setRenderPipelineState(cloudPipeline)
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<CloudUniforms>.stride, index: 0)
+        encoder.setFragmentTexture(noiseTexture, index: 0)
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
 
         encoder.endEncoding()
@@ -139,6 +146,43 @@ final class Renderer: NSObject, MTKViewDelegate {
             attachment?.destinationAlphaBlendFactor = .oneMinusSourceAlpha
         }
         return try device.makeRenderPipelineState(descriptor: descriptor)
+    }
+
+    /// Bruit Perlin-Worley 3D tileable, précomputé une fois en compute shader
+    /// (étape 3). Texture 128³ RGBA : R = Perlin-Worley, GBA = Worley à
+    /// fréquences croissantes (cf. `CloudNoise.metal`).
+    private static func makeNoiseTexture(
+        device: MTLDevice,
+        library: MTLLibrary,
+        queue: MTLCommandQueue
+    ) -> MTLTexture? {
+        let size = 128
+        let descriptor = MTLTextureDescriptor()
+        descriptor.textureType = .type3D
+        descriptor.pixelFormat = .rgba8Unorm
+        descriptor.width = size
+        descriptor.height = size
+        descriptor.depth = size
+        descriptor.usage = [.shaderRead, .shaderWrite]
+        descriptor.storageMode = .private
+
+        guard let texture = device.makeTexture(descriptor: descriptor),
+              let function = library.makeFunction(name: "generate_cloud_noise"),
+              let pipeline = try? device.makeComputePipelineState(function: function),
+              let commandBuffer = queue.makeCommandBuffer(),
+              let encoder = commandBuffer.makeComputeCommandEncoder() else {
+            return nil
+        }
+
+        encoder.setComputePipelineState(pipeline)
+        encoder.setTexture(texture, index: 0)
+        let grid = MTLSize(width: size, height: size, depth: size)
+        let threads = MTLSize(width: 8, height: 8, depth: 8)
+        encoder.dispatchThreads(grid, threadsPerThreadgroup: threads)
+        encoder.endEncoding()
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()  // bruit prêt avant le premier rendu
+        return texture
     }
 
     /// Paysage placeholder : dégradé vertical crépusculaire (sol sombre →
