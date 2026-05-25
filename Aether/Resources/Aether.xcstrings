@@ -1,0 +1,24 @@
+{
+  "sourceLanguage" : "fr",
+  "strings" : {
+    "app.tagline" : {
+      "comment" : "Sous-titre atmosphérique, registre sobre. Non encore affiché.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paint the sky."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Peignez le ciel."
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}
