@@ -1,8 +1,8 @@
 import Foundation
 
 /// Implémentation d'`WeatherService` via l'API publique Open-Meteo (sans clé).
-/// C'est le fallback documenté de WeatherKit, lequel nécessite un entitlement
-/// (à brancher plus tard derrière le même protocole).
+/// C'est le fallback de WeatherKit (source primaire, entitlement requis) ;
+/// `FallbackWeatherService` enchaîne les deux derrière le même protocole.
 struct OpenMeteoWeatherService: WeatherService {
     enum ServiceError: Error {
         case invalidResponse
@@ -15,7 +15,7 @@ struct OpenMeteoWeatherService: WeatherService {
         self.session = session
     }
 
-    func snapshot(at coordinate: GeoCoordinate, date: Date) async throws -> WeatherSnapshot {
+    func report(at coordinate: GeoCoordinate, date: Date) async throws -> WeatherReport {
         var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
         let day = Self.dayFormatter.string(from: date)
         components.queryItems = [
@@ -37,7 +37,8 @@ struct OpenMeteoWeatherService: WeatherService {
         }
 
         let payload = try JSONDecoder().decode(Response.self, from: data)
-        return try payload.snapshot(forHourMatching: date)
+        let snapshot = try payload.snapshot(forHourMatching: date)
+        return WeatherReport(snapshot: snapshot, attribution: .openMeteo)
     }
 
     private static let dayFormatter: DateFormatter = {

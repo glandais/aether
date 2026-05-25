@@ -1,6 +1,7 @@
 import Foundation
 
-/// Fournit l'état météo à un point/instant. Masque WeatherKit (fallback Open-Meteo).
+/// Fournit l'état météo à un point/instant. Source primaire WeatherKit
+/// (entitlement requis), fallback Open-Meteo — voir `FallbackWeatherService`.
 protocol WeatherService: Sendable {
-    func snapshot(at coordinate: GeoCoordinate, date: Date) async throws -> WeatherSnapshot
+    func report(at coordinate: GeoCoordinate, date: Date) async throws -> WeatherReport
 }

@@ -73,9 +73,9 @@ struct CanvasView: View {
     /// Récupère la météo réelle pour la scène ; en cas d'échec, paramètres neutres.
     private func loadWeather() async {
         do {
-            let snapshot = try await weather.snapshot(
+            let report = try await weather.report(
                 at: context.scene.coordinate, date: context.scene.date)
-            cloudParameters = CloudParameters(weather: snapshot)
+            cloudParameters = CloudParameters(weather: report.snapshot)
         } catch {
             cloudParameters = .neutral
         }
