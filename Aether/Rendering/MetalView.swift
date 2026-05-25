@@ -2,8 +2,11 @@ import MetalKit
 import SwiftUI
 
 /// Pont SwiftUI ↔ `MTKView`. Le `Renderer` (delegate) est conservé par le
-/// Coordinator pour vivre aussi longtemps que la vue.
+/// Coordinator pour vivre aussi longtemps que la vue. Les traits de pinceau
+/// sont poussés vers le `Renderer` à chaque mise à jour SwiftUI.
 struct MetalView: UIViewRepresentable {
+    var strokes: [BrushStroke]
+
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
@@ -21,7 +24,7 @@ struct MetalView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: MTKView, context: Context) {
-        // Rien à pousser vers la vue tant que l'état de rendu est statique.
+        context.coordinator.renderer?.updateStrokes(strokes)
     }
 
     @MainActor

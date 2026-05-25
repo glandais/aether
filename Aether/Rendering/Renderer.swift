@@ -4,26 +4,47 @@ import os
 import simd
 
 /// Uniforms du shader de nuage. La disposition mémoire doit correspondre à
-/// `CloudUniforms` dans `Cloud.metal` (float2, float, float, float4).
+/// `CloudUniforms` dans `Cloud.metal`.
 private struct CloudUniforms {
     var resolution: SIMD2<Float>
     var time: Float
     var aspect: Float
     var sunDirection: SIMD4<Float>
+    var volumeCenter: SIMD4<Float>
+    var volumeHalfSize: SIMD4<Float>
 }
 
-/// Rendu de l'étape 2 : le paysage en texture de fond, surmonté d'un nuage
-/// analytique unique (sphère de bruit) raymarché et éclairé par un soleil
-/// directionnel fixe. Le quad de test de l'étape 1 est remplacé par ce nuage.
+/// Un « dab » de pinceau envoyé au compute shader. Doit correspondre à `Dab`
+/// dans `BrushPaint.metal`.
+private struct Dab {
+    var center: SIMD2<Float>
+    var radius: Float
+    var softness: Float
+}
+
+/// Rendu de l'étape 4 : le paysage en texture de fond, surmonté d'un nuage dont
+/// la forme provient d'un volume de densité 3D peint au pinceau. La sphère
+/// analytique des étapes 2-3 est remplacée par ce volume ; le bruit
+/// Perlin-Worley (étape 3) en détaille toujours la densité.
 final class Renderer: NSObject, MTKViewDelegate {
+    private let device: MTLDevice
     private let commandQueue: MTLCommandQueue
     private let backgroundPipeline: MTLRenderPipelineState
     private let cloudPipeline: MTLRenderPipelineState
+    private let paintPipeline: MTLComputePipelineState
     private let landscapeTexture: MTLTexture
     private let noiseTexture: MTLTexture
+    private let densityVolume: MTLTexture
     private let sampler: MTLSamplerState
     private let startTime = CACurrentMediaTime()
     private let log = Logger(subsystem: "io.github.glandais.aether", category: "Renderer")
+
+    // Résolution du volume de densité peint. La forme y est lisse (le détail
+    // vient du bruit Perlin-Worley), donc une résolution modeste suffit.
+    private static let volumeWidth = 96
+    private static let volumeHeight = 96
+    private static let volumeDepth = 48
+    private static let maxDabs = 768
 
     init?(view: MTKView) {
         guard let device = view.device ?? MTLCreateSystemDefaultDevice(),
@@ -32,12 +53,14 @@ final class Renderer: NSObject, MTKViewDelegate {
             // Pas de force-unwrap : sans device / bibliothèque Metal, pas de rendu.
             return nil
         }
+        self.device = device
         view.device = device
 
         guard let backgroundVertex = library.makeFunction(name: "background_vertex"),
               let backgroundFragment = library.makeFunction(name: "background_fragment"),
               let cloudVertex = library.makeFunction(name: "cloud_vertex"),
-              let cloudFragment = library.makeFunction(name: "cloud_fragment") else {
+              let cloudFragment = library.makeFunction(name: "cloud_fragment"),
+              let paintFunction = library.makeFunction(name: "paint_density_volume") else {
             return nil
         }
 
@@ -49,6 +72,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             cloudPipeline = try Renderer.makePipeline(
                 device: device, vertex: cloudVertex, fragment: cloudFragment,
                 pixelFormat: format, blend: .premultiplied)
+            paintPipeline = try device.makeComputePipelineState(function: paintFunction)
         } catch {
             return nil
         }
@@ -71,13 +95,34 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
         noiseTexture = noise
 
+        guard let volume = Renderer.makeDensityVolume(device: device) else {
+            return nil
+        }
+        densityVolume = volume
+
         self.commandQueue = queue
         super.init()
+
+        paintDensityVolume([])  // volume vide au départ : ciel sans nuage
         log.debug("Renderer initialisé sur \(device.name, privacy: .public)")
     }
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
         // L'aspect est relu à chaque frame depuis la taille du drawable.
+    }
+
+    /// Reçoit les traits du canvas (coord. normalisées) et repeint le volume.
+    func updateStrokes(_ strokes: [BrushStroke]) {
+        var dabs: [Dab] = []
+        outer: for stroke in strokes {
+            for point in stroke.points {
+                dabs.append(Dab(center: point, radius: stroke.radius, softness: stroke.softness))
+                if dabs.count >= Renderer.maxDabs {
+                    break outer
+                }
+            }
+        }
+        paintDensityVolume(dabs)
     }
 
     func draw(in view: MTKView) {
@@ -94,24 +139,62 @@ final class Renderer: NSObject, MTKViewDelegate {
         encoder.setFragmentSamplerState(sampler, index: 0)
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
 
-        // 2. Nuage analytique raymarché, composité par-dessus (premultiplied).
+        // 2. Nuage raymarché depuis le volume peint, composité (premultiplied).
         let size = view.drawableSize
         let width = Float(max(size.width, 1))
         let height = Float(max(size.height, 1))
+        let aspect = width / height
         var uniforms = CloudUniforms(
             resolution: SIMD2(width, height),
             time: Float(CACurrentMediaTime() - startTime),
-            aspect: width / height,
+            aspect: aspect,
             // Soleil bas et chaud, cohérent avec l'horizon du paysage.
-            sunDirection: SIMD4(0.55, 0.35, 0.20, 0.0)
+            sunDirection: SIMD4(0.55, 0.35, 0.20, 0.0),
+            // Volume cadré sur le frustum visible à la profondeur z = -5.
+            volumeCenter: SIMD4(0.0, 0.0, -5.0, 0.0),
+            volumeHalfSize: SIMD4(2.5 * aspect, 2.5, 0.9, 0.0)
         )
         encoder.setRenderPipelineState(cloudPipeline)
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<CloudUniforms>.stride, index: 0)
-        encoder.setFragmentTexture(noiseTexture, index: 0)
+        encoder.setFragmentTexture(densityVolume, index: 0)
+        encoder.setFragmentTexture(noiseTexture, index: 1)
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
 
         encoder.endEncoding()
         commandBuffer.present(drawable)
+        commandBuffer.commit()
+    }
+
+    // MARK: - Peinture du volume
+
+    /// Repeint intégralement le volume de densité à partir des dabs courants.
+    /// Un buffer neuf par appel évite toute course avec le GPU.
+    private func paintDensityVolume(_ dabs: [Dab]) {
+        let count = min(dabs.count, Renderer.maxDabs)
+        let stride = MemoryLayout<Dab>.stride
+        guard let dabBuffer = device.makeBuffer(length: max(count, 1) * stride, options: .storageModeShared) else {
+            return
+        }
+        if count > 0 {
+            dabs.withUnsafeBytes { raw in
+                dabBuffer.contents().copyMemory(from: raw.baseAddress!, byteCount: count * stride)
+            }
+        }
+
+        guard let commandBuffer = commandQueue.makeCommandBuffer(),
+              let encoder = commandBuffer.makeComputeCommandEncoder() else {
+            return
+        }
+        var dabCount = UInt32(count)
+        encoder.setComputePipelineState(paintPipeline)
+        encoder.setTexture(densityVolume, index: 0)
+        encoder.setBuffer(dabBuffer, offset: 0, index: 0)
+        encoder.setBytes(&dabCount, length: MemoryLayout<UInt32>.stride, index: 1)
+
+        let grid = MTLSize(width: Renderer.volumeWidth, height: Renderer.volumeHeight, depth: Renderer.volumeDepth)
+        let threads = MTLSize(width: 4, height: 4, depth: 4)
+        encoder.dispatchThreads(grid, threadsPerThreadgroup: threads)
+        encoder.endEncoding()
         commandBuffer.commit()
     }
 
@@ -183,6 +266,20 @@ final class Renderer: NSObject, MTKViewDelegate {
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()  // bruit prêt avant le premier rendu
         return texture
+    }
+
+    /// Volume de densité 3D peint par le pinceau (étape 4). Mono-canal,
+    /// rempli par `paint_density_volume`.
+    private static func makeDensityVolume(device: MTLDevice) -> MTLTexture? {
+        let descriptor = MTLTextureDescriptor()
+        descriptor.textureType = .type3D
+        descriptor.pixelFormat = .r8Unorm
+        descriptor.width = volumeWidth
+        descriptor.height = volumeHeight
+        descriptor.depth = volumeDepth
+        descriptor.usage = [.shaderRead, .shaderWrite]
+        descriptor.storageMode = .private
+        return device.makeTexture(descriptor: descriptor)
     }
 
     /// Paysage placeholder : dégradé vertical crépusculaire (sol sombre →

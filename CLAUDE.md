@@ -51,10 +51,13 @@ vérité). `Aether.xcodeproj` est **git-ignoré** et régénéré via
 - Signature : **automatique**, équipe `7Q49262697` (GABRIEL JEAN YVES ANNE LANDAIS),
   réglée dans `project.yml`
 
-### Piège connu
+### Pièges connus
 
-Le Domain définit un type `Scene`, qui masque `SwiftUI.Scene`. Dans
-`AetherApp`, le `body` doit être typé `some SwiftUI.Scene` (qualifié).
+- Le Domain définit un type `Scene`, qui masque `SwiftUI.Scene`. Dans
+  `AetherApp`, le `body` doit être typé `some SwiftUI.Scene` (qualifié).
+- Le catalogue de strings est `Aether.xcstrings` → table **`Aether`**, pas la
+  table `Localizable` par défaut. Toujours passer `tableName: "Aether"`
+  (`Text("clé", tableName: "Aether")`, `String(localized:table:)`).
 
 ## Architecture en couches strictes
 
@@ -146,6 +149,22 @@ scattering atmosphérique sont volontairement reportés à l'étape 5.
 
 Référence : Schneider 2015/2017, Häggström, Bitsquid (voir `BIBLIO.md`).
 
-**Prochaine cible — étape 4 :** input du pinceau (canvas 2D) → champ de densité
-écrit dans le volume, en remplacement de la sphère analytique. Chaque étape doit
-rester visuellement vérifiable avant la suivante.
+**Étape 4 (pinceau → champ de densité) — terminée.**
+- [x] `CanvasModel` (`@Observable`) + `DragGesture` : peinture de silhouettes
+  en coordonnées normalisées, bouton « Effacer » (registre sobre)
+- [x] `BrushPaint.metal` : compute kernel stampant les dabs dans un volume de
+  densité 3D (96×96×48), silhouette extrudée en profondeur
+- [x] `Cloud.metal` raymarche le volume peint (AABB) au lieu de la sphère ;
+  bruit Perlin-Worley toujours en détail
+- [x] Traits poussés SwiftUI → `Renderer.updateStrokes` → repeinte du volume
+- [x] Vérifiée visuellement sur simulateur (iPhone 17 Pro)
+
+Référence : Schneider 2017 (authoring), Häggström (voir `BIBLIO.md`).
+Simplifications connues : repeinte intégrale du volume à chaque trait (pas
+d'incrémental) ; pinceau rond en coords normalisées (légèrement elliptique à
+l'écran).
+
+**Prochaine cible — étape 5 :** scattering atmosphérique — Beer-Lambert +
+fonction de phase Henyey-Greenstein (double-lobe) + effet *powder*, en
+remplacement de l'éclairage directionnel simple. Chaque étape doit rester
+visuellement vérifiable avant la suivante.

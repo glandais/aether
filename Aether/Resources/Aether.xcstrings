@@ -1,6 +1,23 @@
 {
   "sourceLanguage" : "fr",
   "strings" : {
+    "action.clear" : {
+      "comment" : "Bouton effaçant tous les nuages peints.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Effacer"
+          }
+        }
+      }
+    },
     "app.tagline" : {
       "comment" : "Sous-titre atmosphérique, registre sobre. Non encore affiché.",
       "extractionState" : "stale",
