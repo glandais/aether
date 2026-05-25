@@ -78,6 +78,9 @@ Le Domain définit un type `Scene`, qui masque `SwiftUI.Scene`. Dans
 
 ## Pipeline de rendu — étapes successives, ne pas sauter
 
+Références algorithmiques (papers + code d'exemple), indexées par étape :
+[`BIBLIO.md`](BIBLIO.md).
+
 Chaque étape doit être **visuellement vérifiable** avant de passer à la suivante.
 
 1. MVP scaffold : `MTKView` affichant le paysage en texture de fond + quad de test
