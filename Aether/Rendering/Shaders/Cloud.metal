@@ -19,6 +19,12 @@ struct CloudUniforms {
     float4 volumeHalfSize;  // xyz: world-space half-extents of the volume AABB
 };
 
+// Temporal amortization (step 7): each frame raymarches only the half-res
+// pixels whose 2×2 cell index matches `activeIndex`; the rest reuse history.
+struct CloudTemporal {
+    uint activeIndex;       // 0…3, cycles over frames
+};
+
 struct CloudInOut {
     float4 position [[position]];
     float2 ndc;             // clip-space xy, interpolated across the screen
@@ -131,9 +137,19 @@ vertex CloudInOut cloud_vertex(uint vertexID [[vertex_id]]) {
 // with (one, oneMinusSourceAlpha) blending.
 fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
                                constant CloudUniforms &u [[buffer(0)]],
+                               constant CloudTemporal &temporal [[buffer(1)]],
                                texture3d<float> shape [[texture(0)]],
                                texture3d<float> noise [[texture(1)]],
-                               texture2d<float> sceneDepth [[texture(2)]]) {
+                               texture2d<float> sceneDepth [[texture(2)]],
+                               texture2d<float, access::read> history [[texture(3)]]) {
+    // Temporal amortization: only the active 2×2 cell is raymarched this frame;
+    // the others reuse the previous frame (camera is fixed → same pixel).
+    uint2 px = uint2(in.position.xy);
+    uint cellIndex = (px.y & 1) * 2 + (px.x & 1);
+    if (cellIndex != temporal.activeIndex) {
+        return history.read(px);
+    }
+
     // Fixed pinhole camera at the origin looking down -Z.
     float2 ndc = float2(in.ndc.x * u.aspect, in.ndc.y);
     float3 ro = float3(0.0f, 0.0f, 0.0f);

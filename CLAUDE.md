@@ -188,6 +188,19 @@ Référence : ARKit sceneDepth, Depth Anything V2, soft particles (Wolfire/Flax)
 Hillaire 2016 (voir `BIBLIO.md` §4). La vraie profondeur (LiDAR / Depth Anything
 via `DepthService`) remplacera la depth map placeholder à l'import photo.
 
-**Prochaine cible — étape 7 :** raymarching demi-résolution + reprojection
-temporelle pour la perf sur device bas/moyen de gamme. Chaque étape doit rester
-visuellement vérifiable avant la suivante.
+**Étape 7 (demi-résolution + amortissement temporel) — terminée.**
+- [x] Raymarch rendu hors écran à demi-résolution (RGBA16Float HDR), puis
+  upsamplé/composité plein écran (`Composite.metal`)
+- [x] Amortissement temporel : 1 cellule 2×2 sur 4 raymarchée par frame, le
+  reste réutilisé depuis l'historique (ping-pong de 2 cibles)
+- [x] ~1/16 du coût raymarch par frame (¼ pixels × ¼ temporel), parité visuelle
+  vérifiée sur simulateur
+
+Caméra fixe → pas de motion vectors : la « reprojection » se réduit à une
+accumulation temporelle au même pixel (rafraîchissement sur 4 frames,
+invisible vu la dérive lente). Une caméra mobile nécessiterait de vrais motion
+vectors. Référence : Häkkinen, Nubis Evolved (voir `BIBLIO.md`).
+
+**Prochaine cible — étape 8 :** position soleil/lune dynamique alimentée par
+`AstroService` (formules Meeus / SwiftAA), en remplacement de la direction de
+soleil fixe. Chaque étape doit rester visuellement vérifiable avant la suivante.
