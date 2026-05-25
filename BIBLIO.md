@@ -141,7 +141,54 @@ référence pour le bruit, le fBm et le ray marching de SDF.
 
 ---
 
-## 4. Code d'exemple
+## 4. Composition par profondeur (étape 6)
+
+L'étape 6 a deux faces : (a) **obtenir** une depth map du paysage, et (b) s'en
+servir pour **occlure correctement** les nuages raymarchés par le relief.
+
+### a. Source de la depth map
+
+Pour Aether, la profondeur du paysage vient soit du LiDAR (photos ARKit), soit
+d'une estimation monoculaire (galerie curée / photo sans LiDAR via CoreML).
+
+- **ARKit — `ARFrame.sceneDepth` / `ARDepthData`** : `depthMap` (mètres) +
+  `confidenceMap`, 60 Hz, devices LiDAR uniquement (vérifier
+  `supportsFrameSemantics(_:)`). `smoothedSceneDepth` pour réduire le flicker.
+  - https://developer.apple.com/documentation/arkit/arframe/scenedepth
+  - https://developer.apple.com/documentation/arkit/ardepthdata
+  - *Displaying a point cloud using scene depth* (sample) :
+    https://developer.apple.com/documentation/ARKit/displaying-a-point-cloud-using-scene-depth
+- **Depth Anything V2** (NeurIPS 2024) — depth monoculaire, modèle de
+  fondation. Variante *metric depth* (mètres) utile pour positionner le relief.
+  Small en Apache-2.0 (convertible CoreML) ; Base/Large en CC-BY-NC-4.0
+  (vérifier la licence avant embarquement).
+  - Repo officiel : https://github.com/DepthAnything/Depth-Anything-V2
+  - Page projet : https://depth-anything-v2.github.io/
+  - V1 (CVPR 2024) : https://github.com/LiheYoung/Depth-Anything
+
+> La profondeur monoculaire est *relative* (à recaler en échelle), bruitée et
+> sans bord net. Pour la composition, la traiter comme un masque d'occlusion
+> tolérant (cf. soft particles ci-dessous), pas comme une géométrie exacte.
+
+### b. Occlusion & composition
+
+- **Early ray termination à la profondeur de scène** : pendant le raymarching,
+  borner le rayon par la distance lue dans la depth map (reconstruite en
+  position monde via l'inverse des matrices vue/projection). Le nuage ne
+  s'accumule pas derrière le relief. Häkkinen (§1) décrit l'arrêt anticipé.
+- **Soft particles** : atténuer l'opacité du nuage quand sa profondeur approche
+  celle de la scène, pour éviter les arêtes franches d'intersection avec le
+  relief. Le principe (différence de profondeur → falloff d'alpha) se transpose
+  directement au raymarching.
+  - Wolfire — *Soft Particles* (explication claire) : http://blog.wolfire.com/2010/04/Soft-Particles
+  - Flax — *HOWTO: Make soft particles* : https://docs.flaxengine.com/manual/particles/tutorials/soft-particles.html
+- **Aerial perspective / couplage profondeur ↔ atmosphère** : Hillaire 2016
+  (§1) traite la composition des médias participatifs avec la scène opaque et
+  l'extinction selon la distance — la base physique de l'étape 6.
+
+---
+
+## 5. Code d'exemple
 
 | Projet | Techno | Notes |
 |---|---|---|
@@ -165,7 +212,7 @@ référence pour le bruit, le fBm et le ray marching de SDF.
 
 ---
 
-## 5. Méta-ressources (index tenus à jour)
+## 6. Méta-ressources (index tenus à jour)
 
 - **Sébastien Hillaire / pixelsnafu — *Useful Resources for Rendering Volumetric Clouds*** (gist de référence, la liste la plus complète) :
   https://gist.github.com/pixelsnafu/e3904c49cbd8ff52cb53d95ceda3980e
@@ -187,6 +234,7 @@ référence pour le bruit, le fBm et le ray marching de SDF.
 | 3. Volume textures, bruit Perlin-Worley | Schneider 2015/2017, Häggström, Bitsquid |
 | 4. Pinceau → champ de densité | Schneider 2017 (authoring), Häggström |
 | 5. Scattering (Beer-Lambert + HG) | Hillaire 2016, Patapom, Wallis, Scratchapixel |
+| 6. Composition avec depth map | ARKit sceneDepth, Depth Anything V2, soft particles, Hillaire 2016 |
 | 7. Half-res + temporal reprojection | Häkkinen, Nubis Evolved |
 | 8. Position soleil/lune dynamique | Hillaire 2016 & 2020 |
 | 9. Init depuis météo | Hillaire 2016 (couplage atmosphère/nuages) |
