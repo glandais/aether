@@ -4,18 +4,22 @@
     "action.clear" : {
       "comment" : "Bouton effaçant tous les nuages peints.",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Clear"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Effacer"
-          }
-        }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Effacer" } }
+      }
+    },
+    "action.redo" : {
+      "comment" : "Accessibilité : bouton rétablir le trait annulé.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Redo" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Rétablir" } }
+      }
+    },
+    "action.undo" : {
+      "comment" : "Accessibilité : bouton annuler le dernier trait.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Undo" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Annuler" } }
       }
     },
     "app.tagline" : {

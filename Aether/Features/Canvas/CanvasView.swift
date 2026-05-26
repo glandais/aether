@@ -36,7 +36,9 @@ struct CanvasView: View {
             canvas(light: light)
             VStack(spacing: 14) {
                 Spacer()
-                if !model.strokes.isEmpty { clearButton }
+                if model.canUndo || model.canRedo || !model.strokes.isEmpty {
+                    editToolbar
+                }
                 timeBar(isDaytime: light.isDaytime)
             }
             .padding(.bottom, 28)
@@ -217,19 +219,29 @@ struct CanvasView: View {
         Binding(get: { model[keyPath: keyPath] }, set: { model[keyPath: keyPath] = $0 })
     }
 
-    private var clearButton: some View {
-        Button {
-            model.clear()
-        } label: {
-            // Table « Aether » : le catalogue est `Aether.xcstrings`, pas le défaut.
-            Text("action.clear", tableName: "Aether")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 10)
-                .background(.ultraThinMaterial, in: Capsule())
+    /// Barre d'édition : annuler / rétablir / effacer (registre sobre).
+    private var editToolbar: some View {
+        HStack(spacing: 24) {
+            editButton("arrow.uturn.backward", "action.undo", enabled: model.canUndo) { model.undo() }
+            editButton("arrow.uturn.forward", "action.redo", enabled: model.canRedo) { model.redo() }
+            editButton("trash", "action.clear", enabled: !model.strokes.isEmpty) { model.clear() }
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial, in: Capsule())
+    }
+
+    private func editButton(
+        _ systemName: String, _ labelKey: String.LocalizationValue,
+        enabled: Bool, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName).font(.body)
         }
         .buttonStyle(.plain)
+        .foregroundStyle(enabled ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+        .disabled(!enabled)
+        .accessibilityLabel(Text(String(localized: labelKey, table: "Aether")))
     }
 
     // MARK: - Météo

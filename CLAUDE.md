@@ -361,6 +361,18 @@ Le nuage s'éclaire selon la scène, plus de constantes crépusculaires figées 
   l'un, écrit l'autre) — pas de `read_write`, donc format filtrable conservé.
 - Vérifié : panneau pinceau affiché, nuage rendu depuis le volume.
 
+## Annuler / Rétablir — **terminé**
+
+- Granularité = un trait achevé (et l'effacement). `CanvasModel` tient deux
+  piles d'instantanés `[[BrushStroke]]` ; `beginStroke`/`clear` empilent l'état
+  d'avant et purgent la pile de rétablissement.
+- Aucun changement du `Renderer` : sa mise à jour incrémentale gère déjà le
+  retrait (compte de dabs ↓ → vide + repeinte) comme l'ajout (→ stamp de la
+  queue). Les états d'historique sont des préfixes imbriqués, donc cohérents.
+- `CanvasView` : barre d'édition sobre (annuler / rétablir / effacer, icônes
+  désactivées selon `canUndo`/`canRedo`), affichée dès qu'il y a un historique.
+- Tests : `CanvasModelTests` (annuler/rétablir, purge de la pile, effacement).
+
 ## Reste à faire
 
 - **Réglages** (`Features/Settings`) : choisir le **lieu** (l'heure est déjà

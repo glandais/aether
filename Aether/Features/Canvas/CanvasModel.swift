@@ -4,6 +4,10 @@ import simd
 /// État du canvas de peinture : les traits de pinceau déjà tracés, exprimés en
 /// coordonnées normalisées [0,1]² (origine en haut à gauche). Type d'UI ; le
 /// rendu consomme `strokes` (modèles `BrushStroke` du Domain).
+///
+/// Historique annuler/rétablir à la granularité du trait : chaque trait achevé
+/// (et chaque effacement) est une action réversible. Le `Renderer` repeint
+/// automatiquement (sa mise à jour incrémentale gère l'ajout comme le retrait).
 @MainActor
 @Observable
 final class CanvasModel {
@@ -17,7 +21,15 @@ final class CanvasModel {
     /// Distance minimale entre deux points d'un même trait (décimation).
     private let minSpacing: Float = 0.012
 
+    /// Piles d'historique : instantanés de l'état `strokes`.
+    private var undoStack: [[BrushStroke]] = []
+    private var redoStack: [[BrushStroke]] = []
+
+    var canUndo: Bool { !undoStack.isEmpty }
+    var canRedo: Bool { !redoStack.isEmpty }
+
     func beginStroke(at point: SIMD2<Float>) {
+        recordHistory()  // instantané d'avant-trait : l'annulation y revient
         strokes.append(BrushStroke(points: [point], radius: brushRadius, softness: brushSoftness))
         isDrawing = true
     }
@@ -36,7 +48,30 @@ final class CanvasModel {
     }
 
     func clear() {
+        guard !strokes.isEmpty else { return }
+        recordHistory()
         strokes = []
         isDrawing = false
+    }
+
+    func undo() {
+        guard let previous = undoStack.popLast() else { return }
+        redoStack.append(strokes)
+        strokes = previous
+        isDrawing = false
+    }
+
+    func redo() {
+        guard let next = redoStack.popLast() else { return }
+        undoStack.append(strokes)
+        strokes = next
+        isDrawing = false
+    }
+
+    /// Empile l'état courant et invalide la pile de rétablissement (nouvelle
+    /// branche d'historique).
+    private func recordHistory() {
+        undoStack.append(strokes)
+        redoStack.removeAll()
     }
 }
