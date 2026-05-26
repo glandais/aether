@@ -11,15 +11,11 @@ struct CanvasView: View {
     let context: SceneContext
 
     @State private var model = CanvasModel()
-    @State private var cloudParameters = CloudParameters.neutral
     /// Heure locale choisie (heures, 0…24). `nil` = heure d'origine de la scène.
     @State private var hourOverride: Double?
-    @State private var attribution: WeatherAttribution?
     @State private var showBrushControls = false
 
     private let astro = SwiftAAAstroService()
-    private let weather = FallbackWeatherService(
-        services: [WeatherKitWeatherService(), OpenMeteoWeatherService()])
 
     /// Éclairage résolu pour l'instant courant : direction, couleur, ambiance.
     private struct ResolvedLight {
@@ -43,15 +39,9 @@ struct CanvasView: View {
             }
             .padding(.bottom, 28)
         }
-        .overlay(alignment: .top) {
-            if let attribution {
-                weatherAttribution(attribution).padding(.top, 8)
-            }
-        }
         .overlay(alignment: .topTrailing) {
             brushControls.padding(.trailing, 16).padding(.top, 8)
         }
-        .task(id: context.id) { await loadWeather() }
     }
 
     // MARK: - Heure & éclairage
@@ -118,7 +108,7 @@ struct CanvasView: View {
             sunDirection: light.direction,
             sunColor: light.color,
             skyAmbient: light.ambient,
-            cloudParameters: cloudParameters,
+            cloudParameters: context.cloudParameters,
             cameraTanHalfFov: tanHalfFieldOfView,
             landscape: context.landscape,
             depthMap: context.depthMap,
@@ -245,45 +235,6 @@ struct CanvasView: View {
     }
 
     // MARK: - Météo
-
-    /// Récupère la météo réelle pour la scène (heure d'origine) ; en cas d'échec,
-    /// paramètres neutres. L'heure scrutée n'affecte que la lumière, pas la météo.
-    private func loadWeather() async {
-        do {
-            let report = try await weather.report(
-                at: context.scene.coordinate, date: context.scene.date)
-            cloudParameters = CloudParameters(weather: report.snapshot)
-            attribution = report.attribution
-        } catch {
-            cloudParameters = .neutral
-            attribution = nil
-        }
-    }
-
-    @ViewBuilder
-    private func weatherAttribution(_ attribution: WeatherAttribution) -> some View {
-        let content = Group {
-            if let logoURL = attribution.logoDarkURL ?? attribution.logoLightURL {
-                AsyncImage(url: logoURL) { image in
-                    image.resizable().scaledToFit()
-                } placeholder: {
-                    Text(attribution.serviceName)
-                }
-                .frame(height: 12)
-            } else {
-                Text(attribution.serviceName)
-            }
-        }
-        .font(.caption2)
-        .foregroundStyle(.secondary)
-
-        if let url = attribution.legalURL {
-            Link(destination: url) { content }
-                .accessibilityLabel(Text("attribution.weather", tableName: "Aether"))
-        } else {
-            content
-        }
-    }
 
     private func paintGesture(in size: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 0)

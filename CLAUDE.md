@@ -16,8 +16,8 @@ Jamais « fun » ni enfantin.
 L'utilisateur choisit un paysage dans une galerie curée, peint des silhouettes
 de nuages dans un canvas 2D simple, et un moteur de rendu volumétrique Metal
 transforme ces silhouettes en nuages 3D plausibles, éclairés par la position
-réelle du soleil et de la lune à l'endroit et à l'heure choisis. La météo réelle
-à ce point/instant informe l'état initial.
+réelle du soleil et de la lune à l'endroit et à l'heure choisis. Une météo
+statique propre à chaque paysage curé informe l'état initial.
 
 Expérience visée : **contemplative, lente, satisfaisante**. Pas d'éditeur 3D
 complexe — une poignée de sliders au maximum.
@@ -28,12 +28,13 @@ complexe — une poignée de sliders au maximum.
 - **SwiftUI** pour toute la chrome UI (gallery, palette, sliders, settings)
 - **MetalKit** (`MTKView`) pour le canvas de rendu volumétrique
 - **Metal Shading Language** : raymarching, bruit 3D, composition
-- **WeatherKit** pour la météo (fallback **Open-Meteo**)
+- **Météo statique** : chaque paysage curé porte un `WeatherSnapshot` figé (plus
+  de récupération réseau / WeatherKit)
 - **CoreLocation** : lieu de la scène (orientation du ciel)
 - **SwiftAA** : positions soleil/lune (fallback impl. interne formules Meeus)
 - **Swift Concurrency** (async/await, actors) — **pas de Combine, pas de RxSwift**
 - **SwiftPM uniquement**, pas de CocoaPods
-- **Tests** : XCTest + Swift Testing pour le métier (astro, weather mapping,
+- **Tests** : XCTest + Swift Testing pour le métier (astro, météo→nuage,
   brush→volume)
 
 ### Outillage projet
@@ -98,7 +99,7 @@ capturer, **puis retirer le code temporaire**.
 | `Aether/Features/` | modules SwiftUI par feature (Canvas, Gallery, Settings) | Domain, Services |
 | `Aether/Rendering/` | pipeline Metal, shaders, volume textures | Domain **uniquement** |
 | `Aether/Domain/` | modèles purs (`Scene`, `CloudVolume`, `BrushStroke`, `Lighting`, `WeatherSnapshot`, `CelestialPosition`) | **rien** |
-| `Aether/Services/` | `WeatherService`, `AstroService`, `LocationService` (protocoles + impl) | Domain |
+| `Aether/Services/` | `AstroService`, `LocationService` (protocoles + impl) | Domain |
 | `Aether/Resources/` | assets, paysages curés | — |
 
 **Règles de dépendance :**
@@ -107,7 +108,7 @@ capturer, **puis retirer le code temporaire**.
 - Features dépendent de Domain et Services.
 - Rendering dépend de Domain uniquement (pas de Service direct ; on lui passe des
   modèles déjà résolus).
-- Toute dépendance externe (WeatherKit, CoreLocation, MLModel) est cachée
+- Toute dépendance externe (CoreLocation, SwiftAA) est cachée
   derrière un protocole pour la testabilité.
 
 ## Pipeline de rendu — étapes successives, ne pas sauter
@@ -125,7 +126,7 @@ Chaque étape doit être **visuellement vérifiable** avant de passer à la suiv
 6. Composition avec depth map du paysage (occlusion correcte des reliefs)
 7. Half-res raymarching + temporal reprojection (perf device bas/moyen de gamme)
 8. Position soleil/lune dynamique alimentée par `AstroService`
-9. Initialisation des paramètres depuis `WeatherService`
+9. Initialisation des paramètres depuis la météo statique du paysage
 
 ## Conventions
 
@@ -250,16 +251,16 @@ l'instant ; le choix lieu/heure passera par les réglages. La Lune est calculée
 et testée ; l'éclairage lunaire nocturne (palette froide) reste à brancher.
 
 **Étape 9 (initialisation depuis la météo) — terminée.**
-- [x] `OpenMeteoWeatherService` (Services) : météo réelle via l'API publique
-  Open-Meteo (sans clé) — fallback documenté de WeatherKit
+- [x] `WeatherSnapshot` statique par paysage curé (`CuratedLandscape.catalog`) :
+  plus aucune récupération réseau
 - [x] `CloudParameters` (Domain) : mapping pur météo → {biais de couverture,
   échelle d'opacité} ; dégagé/sec → fin et clairsemé, couvert/humide → plein et opaque
-- [x] `CanvasView` récupère la météo en tâche async et passe les paramètres au
-  `Renderer` (fallback neutre si réseau indisponible)
-- [x] Tests : mapping overcast/clear/monotone (hors ligne)
-- [x] Vérifiée en direct : Paris dégagé (0 % nuage) → nuage peint aminci
+- [x] `CuratedLandscape.makeContext()` résout les `CloudParameters` et les place
+  dans le `SceneContext` ; `CanvasView` les passe au `Renderer`
+- [x] Tests : mapping overcast/clear/monotone (`CloudParametersTests`)
+- [x] Vérifiée : Reykjavik couvert → nuage plein ; Sydney midi dégagé → aminci
 
-Référence : Hillaire 2016, Open-Meteo (voir `BIBLIO.md`).
+Référence : Hillaire 2016 (voir `BIBLIO.md`).
 
 ---
 
@@ -295,29 +296,22 @@ Le nuage s'éclaire selon la scène, plus de constantes crépusculaires figées 
 - Vérifié : photo de jour → nuage blanc (comme les vrais) ; crépuscule curé →
   nuage chaud et tamisé.
 
-## WeatherKit source primaire — **terminé**
+## Météo statique — **terminé**
 
-- `WeatherService` renvoie un `WeatherReport` (snapshot + `WeatherAttribution`).
-- `WeatherKitWeatherService` (Services) : source primaire via WeatherKit
-  (entitlement `com.apple.developer.weatherkit`) ; toute erreur ou date hors
-  fenêtre → `throw`. `WeatherKit.WeatherService` est qualifié pour éviter la
-  collision avec notre protocole `WeatherService`.
-- `FallbackWeatherService` : cascade `[WeatherKit, Open-Meteo]`, premier succès,
-  log des bascules (`Logger`, catégorie `weather`).
-- `CanvasView` affiche l'attribution de la source réellement utilisée (logo
-  WeatherKit + lien légal, ou crédit Open-Meteo) en bas à droite, registre sobre.
-- **Prérequis portail** : l'App ID `io.github.glandais.aether` doit avoir le
-  service **WeatherKit** activé dans Apple Developer (propagation ~30 min). Avant
-  cela, l'appel live échoue → fallback Open-Meteo silencieux.
-- Tests : `FallbackWeatherServiceTests` (cascade), `WeatherKitMappingTests`
-  (condition → Domain). L'appel WeatherKit live est vérifié manuellement.
+La récupération réseau (WeatherKit / Open-Meteo) a été retirée : chaque paysage
+curé porte un `WeatherSnapshot` figé dans `CuratedLandscape.catalog` (condition,
+couverture, humidité, vent, température choisis pour coller à l'ambiance du
+lieu). `makeContext()` en dérive les `CloudParameters` (via `CloudParameters(weather:)`,
+mapping pur testé) et les transporte dans le `SceneContext`. Plus d'entitlement
+`com.apple.developer.weatherkit`, plus d'attribution de source, plus de
+dépendance réseau.
 
 ## Heure choisie + lune — **terminé**
 
 - **Curseur d'heure** (`CanvasView`) : déplace l'instant de la scène (heure
   locale via `Scene.utcOffset`) → l'`AstroService` recalcule soleil **et** lune,
   le nuage se rallume en direct (dawn chaud → midi blanc → crépuscule → nuit).
-  La météo reste figée à l'heure d'origine (seule la lumière bouge).
+  La météo (statique) ne bouge pas : seule la lumière change.
 - **Éclairage lunaire** (`MoonLighting`, Domain) : froid et faible, modulé par la
   hauteur de la lune et sa fraction éclairée (`AstroService.moonIlluminatedFraction`,
   SwiftAA). `CanvasView` fond soleil↔lune selon la hauteur du soleil (bande

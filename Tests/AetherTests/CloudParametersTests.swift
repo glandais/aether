@@ -1,8 +1,8 @@
 import Testing
 @testable import Aether
 
-/// Valide le mapping météo → paramètres de nuage (étape 9). Pur et hors ligne :
-/// le `WeatherService` (réseau) n'est pas sollicité ici.
+/// Valide le mapping météo → paramètres de nuage (étape 9). Pur : la météo des
+/// paysages curés est figée, aucune récupération réseau.
 struct CloudParametersTests {
     @Test("Un ciel couvert et humide donne des nuages pleins et opaques")
     func overcastIsDenseAndFull() {

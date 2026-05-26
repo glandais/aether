@@ -72,23 +72,6 @@
           }
         }
       }
-    },
-    "attribution.weather" : {
-      "comment" : "Libellé d'accessibilité du lien d'attribution de la source météo.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Weather source"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Source météo"
-          }
-        }
-      }
     }
   },
   "version" : "1.0"

@@ -69,8 +69,8 @@ final class Renderer: NSObject, MTKViewDelegate {
     // l'`AstroService` (étape 8). Valeur de repli avant la première mise à jour.
     private var sunDirection = SIMD3<Float>(0.40, 0.12, -0.50)
 
-    // Paramètres météo (étape 9), résolus par la Feature depuis le
-    // `WeatherService`. Neutres avant la première mise à jour.
+    // Paramètres météo (étape 9), résolus par la Feature depuis la météo
+    // statique du paysage curé. Neutres avant la première mise à jour.
     private var cloudParameters = CloudParameters.neutral
 
     // tan(FOV vertical / 2) de la caméra de la scène (défaut ≈ 53°). Cale la
