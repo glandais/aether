@@ -15,6 +15,7 @@ struct CanvasView: View {
     /// Heure locale choisie (heures, 0…24). `nil` = heure d'origine de la scène.
     @State private var hourOverride: Double?
     @State private var attribution: WeatherAttribution?
+    @State private var showBrushControls = false
 
     private let astro = SwiftAAAstroService()
     private let weather = FallbackWeatherService(
@@ -44,6 +45,9 @@ struct CanvasView: View {
             if let attribution {
                 weatherAttribution(attribution).padding(.top, 8)
             }
+        }
+        .overlay(alignment: .topTrailing) {
+            brushControls.padding(.trailing, 16).padding(.top, 8)
         }
         .task(id: context.id) { await loadWeather() }
     }
@@ -164,6 +168,53 @@ struct CanvasView: View {
         formatter.timeZone = sceneTimeZone
         formatter.dateFormat = "HH:mm"
         return formatter.string(from: effectiveDate)
+    }
+
+    /// Réglages du pinceau (rayon, adoucissement), révélés par un bouton sobre.
+    /// Affectent les prochains traits peints.
+    private var brushControls: some View {
+        VStack(alignment: .trailing, spacing: 10) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { showBrushControls.toggle() }
+            } label: {
+                Image(systemName: "paintbrush.pointed")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                    .padding(12)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+            .buttonStyle(.plain)
+
+            if showBrushControls {
+                VStack(spacing: 14) {
+                    brushSlider(
+                        icon: "smallcircle.filled.circle",
+                        value: binding(\.brushRadius), range: 0.03...0.25)
+                    brushSlider(
+                        icon: "drop",
+                        value: binding(\.brushSoftness), range: 0...1)
+                }
+                .frame(width: 180)
+                .padding(16)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .topTrailing)))
+            }
+        }
+    }
+
+    private func brushSlider(icon: String, value: Binding<Float>, range: ClosedRange<Float>) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+            Slider(value: value, in: range).tint(.white.opacity(0.55))
+        }
+    }
+
+    /// Binding vers une propriété du `CanvasModel` (@Observable via @State).
+    private func binding(_ keyPath: ReferenceWritableKeyPath<CanvasModel, Float>) -> Binding<Float> {
+        Binding(get: { model[keyPath: keyPath] }, set: { model[keyPath: keyPath] = $0 })
     }
 
     private var clearButton: some View {

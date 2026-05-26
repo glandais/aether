@@ -51,6 +51,36 @@ vérité). `Aether.xcodeproj` est **git-ignoré** et régénéré via
 - Signature : **automatique**, équipe `7Q49262697` (GABRIEL JEAN YVES ANNE LANDAIS),
   réglée dans `project.yml`
 
+### Build & vérification
+
+Simulateur de référence : **iPhone 17 Pro** ; `DerivedData` dans `build/dd`.
+
+```sh
+# 1. (Re)générer le projet après tout ajout/déplacement de fichier
+xcodegen generate
+
+# 2. Compiler
+xcodebuild build -project Aether.xcodeproj -scheme Aether \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath build/dd
+
+# 3. Tests (métier : astro, météo, EXIF, éclairage…)
+xcodebuild test -project Aether.xcodeproj -scheme Aether \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath build/dd
+
+# 4. Vérification visuelle : installer, lancer, capturer
+APP="build/dd/Build/Products/Debug-iphonesimulator/Aether.app"
+SIM="iPhone 17 Pro"
+xcrun simctl install "$SIM" "$APP"
+xcrun simctl launch "$SIM" io.github.glandais.aether
+xcrun simctl io "$SIM" screenshot build/shot.png
+```
+
+Le rendu Metal n'étant pas testable unitairement, **chaque étape se vérifie par
+capture d'écran sur simulateur**. Le `PhotosPicker` et les gestes ne se pilotent
+pas sans interaction : pour vérifier le rendu d'un paysage/nuage donné, injecter
+temporairement un `SceneContext` (ou un trait pré-peint dans `CanvasModel`),
+capturer, **puis retirer le code temporaire**.
+
 ### Pièges connus
 
 - Le Domain définit un type `Scene`, qui masque `SwiftUI.Scene`. Dans
@@ -314,6 +344,18 @@ Le nuage s'éclaire selon la scène, plus de constantes crépusculaires figées 
 - Tests : `MoonLighting` (phase/hauteur, teinte froide), fraction éclairée ∈ [0,1].
 - Vérifié : scène curée scrutée midi → nuage blanc ; nuit → nuage sombre/froid.
 
+## Pinceau — **terminé**
+
+- **Réglages** (`CanvasView`) : bouton sobre (haut-droite) révélant rayon +
+  adoucissement (sliders liés à `CanvasModel.brushRadius`/`brushSoftness`,
+  appliqués aux prochains traits).
+- **Repeinte incrémentale** : `BrushPaint.metal` → `stamp_density_volume`
+  (texture `read_write`, max-combine) n'ajoute que les **nouveaux** dabs depuis
+  la dernière mise à jour ; `clear_density_volume` vide. `Renderer` suit
+  `stampedDabCount` → un trait qui s'allonge coûte O(nouveaux dabs), plus la
+  repeinte intégrale de l'étape 4. Volume passé en **R32Float** (accès read_write).
+- Vérifié : panneau pinceau affiché, nuage rendu depuis le volume read_write.
+
 ## Reste à faire
 
 - **Réglages** (`Features/Settings`) : choisir le **lieu** (l'heure est déjà
@@ -322,4 +364,3 @@ Le nuage s'éclaire selon la scène, plus de constantes crépusculaires figées 
 - **Fond de ciel dynamique** : le paysage est une image figée — il ne suit pas
   l'heure scrutée (seul le nuage se rallume). Ciel procédural = gros chantier.
 - **Profilage perf sur device réel** (étape 7 vérifiée structurellement seulement).
-- Pinceau : repeinte incrémentale du volume, sliders (rayon/adoucissement).

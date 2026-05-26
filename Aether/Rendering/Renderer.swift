@@ -42,7 +42,8 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let backgroundPipeline: MTLRenderPipelineState
     private let cloudPipeline: MTLRenderPipelineState
     private let compositePipeline: MTLRenderPipelineState
-    private let paintPipeline: MTLComputePipelineState
+    private let stampPipeline: MTLComputePipelineState
+    private let clearPipeline: MTLComputePipelineState
     // Paysage + depth map : placeholders au départ, remplacés par la Feature
     // (galerie curée ou photo importée) via `setLandscape` / `setDepthMap`.
     private var landscapeTexture: MTLTexture
@@ -88,6 +89,9 @@ final class Renderer: NSObject, MTKViewDelegate {
     private static let maxDabs = 768
     private static let cloudColorFormat: MTLPixelFormat = .rgba16Float
 
+    // Nombre de dabs déjà stampés dans le volume (repeinte incrémentale).
+    private var stampedDabCount = 0
+
     init?(view: MTKView) {
         guard let device = view.device ?? MTLCreateSystemDefaultDevice(),
               let queue = device.makeCommandQueue(),
@@ -104,7 +108,8 @@ final class Renderer: NSObject, MTKViewDelegate {
               let cloudFragment = library.makeFunction(name: "cloud_fragment"),
               let compositeVertex = library.makeFunction(name: "composite_vertex"),
               let compositeFragment = library.makeFunction(name: "composite_fragment"),
-              let paintFunction = library.makeFunction(name: "paint_density_volume") else {
+              let stampFunction = library.makeFunction(name: "stamp_density_volume"),
+              let clearFunction = library.makeFunction(name: "clear_density_volume") else {
             return nil
         }
 
@@ -121,7 +126,8 @@ final class Renderer: NSObject, MTKViewDelegate {
             compositePipeline = try Renderer.makePipeline(
                 device: device, vertex: compositeVertex, fragment: compositeFragment,
                 pixelFormat: format, blend: .premultiplied)
-            paintPipeline = try device.makeComputePipelineState(function: paintFunction)
+            stampPipeline = try device.makeComputePipelineState(function: stampFunction)
+            clearPipeline = try device.makeComputePipelineState(function: clearFunction)
         } catch {
             return nil
         }
@@ -157,7 +163,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         self.commandQueue = queue
         super.init()
 
-        paintDensityVolume([])  // volume vide au départ : ciel sans nuage
+        clearVolume()  // volume vide au départ : ciel sans nuage
         log.debug("Renderer initialisé sur \(device.name, privacy: .public)")
     }
 
@@ -230,7 +236,9 @@ final class Renderer: NSObject, MTKViewDelegate {
         depthTexture = texture
     }
 
-    /// Reçoit les traits du canvas (coord. normalisées) et repeint le volume.
+    /// Reçoit les traits du canvas (coord. normalisées) et met à jour le volume
+    /// de façon incrémentale : seuls les dabs ajoutés depuis la dernière mise à
+    /// jour sont stampés. Un trait qui s'allonge coûte O(nouveaux dabs).
     func updateStrokes(_ strokes: [BrushStroke]) {
         var dabs: [Dab] = []
         outer: for stroke in strokes {
@@ -241,7 +249,19 @@ final class Renderer: NSObject, MTKViewDelegate {
                 }
             }
         }
-        paintDensityVolume(dabs)
+
+        if dabs.count == stampedDabCount {
+            return  // rien de nouveau
+        }
+        if dabs.count < stampedDabCount {
+            // Effacement / réinitialisation : on repart d'un volume vide.
+            clearVolume()
+            stampedDabCount = 0
+        }
+        if dabs.count > stampedDabCount {
+            stampDabs(Array(dabs[stampedDabCount..<dabs.count]))
+            stampedDabCount = dabs.count
+        }
     }
 
     func draw(in view: MTKView) {
@@ -321,18 +341,17 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     // MARK: - Peinture du volume
 
-    /// Repeint intégralement le volume de densité à partir des dabs courants.
+    /// Stampe les dabs fournis dans le volume (max-combine avec l'existant).
     /// Un buffer neuf par appel évite toute course avec le GPU.
-    private func paintDensityVolume(_ dabs: [Dab]) {
+    private func stampDabs(_ dabs: [Dab]) {
         let count = min(dabs.count, Renderer.maxDabs)
+        guard count > 0 else { return }
         let stride = MemoryLayout<Dab>.stride
-        guard let dabBuffer = device.makeBuffer(length: max(count, 1) * stride, options: .storageModeShared) else {
+        guard let dabBuffer = device.makeBuffer(length: count * stride, options: .storageModeShared) else {
             return
         }
-        if count > 0 {
-            dabs.withUnsafeBytes { raw in
-                dabBuffer.contents().copyMemory(from: raw.baseAddress!, byteCount: count * stride)
-            }
+        dabs.withUnsafeBytes { raw in
+            dabBuffer.contents().copyMemory(from: raw.baseAddress!, byteCount: count * stride)
         }
 
         guard let commandBuffer = commandQueue.makeCommandBuffer(),
@@ -340,17 +359,32 @@ final class Renderer: NSObject, MTKViewDelegate {
             return
         }
         var dabCount = UInt32(count)
-        encoder.setComputePipelineState(paintPipeline)
+        encoder.setComputePipelineState(stampPipeline)
         encoder.setTexture(densityVolume, index: 0)
         encoder.setBuffer(dabBuffer, offset: 0, index: 0)
         encoder.setBytes(&dabCount, length: MemoryLayout<UInt32>.stride, index: 1)
-
-        let grid = MTLSize(width: Renderer.volumeWidth, height: Renderer.volumeHeight, depth: Renderer.volumeDepth)
-        let threads = MTLSize(width: 4, height: 4, depth: 4)
-        encoder.dispatchThreads(grid, threadsPerThreadgroup: threads)
+        encoder.dispatchThreads(volumeGrid, threadsPerThreadgroup: volumeThreads)
         encoder.endEncoding()
         commandBuffer.commit()
     }
+
+    /// Remet le volume de densité à zéro.
+    private func clearVolume() {
+        guard let commandBuffer = commandQueue.makeCommandBuffer(),
+              let encoder = commandBuffer.makeComputeCommandEncoder() else {
+            return
+        }
+        encoder.setComputePipelineState(clearPipeline)
+        encoder.setTexture(densityVolume, index: 0)
+        encoder.dispatchThreads(volumeGrid, threadsPerThreadgroup: volumeThreads)
+        encoder.endEncoding()
+        commandBuffer.commit()
+    }
+
+    private var volumeGrid: MTLSize {
+        MTLSize(width: Renderer.volumeWidth, height: Renderer.volumeHeight, depth: Renderer.volumeDepth)
+    }
+    private var volumeThreads: MTLSize { MTLSize(width: 4, height: 4, depth: 4) }
 
     // MARK: - Cibles demi-résolution
 
@@ -467,12 +501,13 @@ final class Renderer: NSObject, MTKViewDelegate {
         return texture
     }
 
-    /// Volume de densité 3D peint par le pinceau (étape 4). Mono-canal,
-    /// rempli par `paint_density_volume`.
+    /// Volume de densité 3D peint par le pinceau. Mono-canal R32Float pour
+    /// l'accès `read_write` (repeinte incrémentale max-combine) ; rempli par
+    /// `stamp_density_volume`, vidé par `clear_density_volume`.
     private static func makeDensityVolume(device: MTLDevice) -> MTLTexture? {
         let descriptor = MTLTextureDescriptor()
         descriptor.textureType = .type3D
-        descriptor.pixelFormat = .r8Unorm
+        descriptor.pixelFormat = .r32Float
         descriptor.width = volumeWidth
         descriptor.height = volumeHeight
         descriptor.depth = volumeDepth

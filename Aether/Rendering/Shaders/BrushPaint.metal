@@ -1,10 +1,14 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// Pipeline step 4: stamp the user's brush strokes into a 3D density volume.
-// Each "dab" is one painted point in the 2D canvas ([0,1]²); the silhouette is
-// extruded through the volume's depth with a rounded profile so the cloud has
-// thickness. The raymarch (Cloud.metal) reads this volume as the cloud's shape.
+// Pipeline step 4 (+ incremental repaint): stamp the user's brush strokes into a
+// 3D density volume. Each "dab" is one painted point in the 2D canvas ([0,1]²);
+// the silhouette is extruded through the volume's depth with a rounded profile
+// so the cloud has thickness. The raymarch (Cloud.metal) reads this volume.
+//
+// `stamp_density_volume` only adds the NEW dabs since the last update and
+// max-combines them with the existing volume (read-write) — so a long stroke
+// costs O(new dabs), not O(all dabs), per frame.
 
 struct Dab {
     float2 center;    // canvas position, [0,1]² (top-left origin)
@@ -12,7 +16,7 @@ struct Dab {
     float  softness;  // 0 = hard edge, 1 = very soft
 };
 
-kernel void paint_density_volume(texture3d<float, access::write> volume [[texture(0)]],
+kernel void stamp_density_volume(texture3d<float, access::read_write> volume [[texture(0)]],
                                  constant Dab *dabs [[buffer(0)]],
                                  constant uint &count [[buffer(1)]],
                                  uint3 gid [[thread_position_in_grid]]) {
@@ -38,5 +42,16 @@ kernel void paint_density_volume(texture3d<float, access::write> volume [[textur
         coverage = max(coverage, c);
     }
 
-    volume.write(float4(coverage * depthProfile), gid);
+    // Combine with what's already painted (incremental accumulation).
+    float existing = volume.read(gid).r;
+    volume.write(float4(max(existing, coverage * depthProfile)), gid);
+}
+
+kernel void clear_density_volume(texture3d<float, access::write> volume [[texture(0)]],
+                                 uint3 gid [[thread_position_in_grid]]) {
+    uint3 dims = uint3(volume.get_width(), volume.get_height(), volume.get_depth());
+    if (any(gid >= dims)) {
+        return;
+    }
+    volume.write(float4(0.0f), gid);
 }
