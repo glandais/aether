@@ -7,8 +7,10 @@ using namespace metal;
 // so the cloud has thickness. The raymarch (Cloud.metal) reads this volume.
 //
 // `stamp_density_volume` only adds the NEW dabs since the last update and
-// max-combines them with the existing volume (read-write) — so a long stroke
-// costs O(new dabs), not O(all dabs), per frame.
+// max-combines them with the existing volume — so a long stroke costs O(new
+// dabs), not O(all dabs), per frame. Ping-pong (read `src`, write `dst`) keeps
+// the volume R8Unorm, which is filterable on iOS GPUs (R32Float is not, so
+// linear sampling would fall back to nearest → blocky clouds on device).
 
 struct Dab {
     float2 center;    // canvas position, [0,1]² (top-left origin)
@@ -16,11 +18,12 @@ struct Dab {
     float  softness;  // 0 = hard edge, 1 = very soft
 };
 
-kernel void stamp_density_volume(texture3d<float, access::read_write> volume [[texture(0)]],
+kernel void stamp_density_volume(texture3d<float, access::read> src [[texture(0)]],
+                                 texture3d<float, access::write> dst [[texture(1)]],
                                  constant Dab *dabs [[buffer(0)]],
                                  constant uint &count [[buffer(1)]],
                                  uint3 gid [[thread_position_in_grid]]) {
-    uint3 dims = uint3(volume.get_width(), volume.get_height(), volume.get_depth());
+    uint3 dims = uint3(dst.get_width(), dst.get_height(), dst.get_depth());
     if (any(gid >= dims)) {
         return;
     }
@@ -42,9 +45,9 @@ kernel void stamp_density_volume(texture3d<float, access::read_write> volume [[t
         coverage = max(coverage, c);
     }
 
-    // Combine with what's already painted (incremental accumulation).
-    float existing = volume.read(gid).r;
-    volume.write(float4(max(existing, coverage * depthProfile)), gid);
+    // Carry the existing density forward, max-combined with the new dabs.
+    float existing = src.read(gid).r;
+    dst.write(float4(max(existing, coverage * depthProfile)), gid);
 }
 
 kernel void clear_density_volume(texture3d<float, access::write> volume [[texture(0)]],

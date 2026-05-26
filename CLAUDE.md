@@ -88,6 +88,10 @@ capturer, **puis retirer le code temporaire**.
 - Le catalogue de strings est `Aether.xcstrings` → table **`Aether`**, pas la
   table `Localizable` par défaut. Toujours passer `tableName: "Aether"`
   (`Text("clé", tableName: "Aether")`, `String(localized:table:)`).
+- **Filtrage de texture** : `R32Float` n'est **pas filtrable** sur GPU iOS
+  (seulement sur Mac → le simulateur masque le bug). Toute texture
+  échantillonnée en `filter::linear` doit être ≤ 16 bits (R8Unorm, RGBA16Float).
+  Réserver `R32Float` aux échantillonnages `nearest` (ex. depth map).
 
 ## Architecture en couches strictes
 
@@ -350,11 +354,12 @@ Le nuage s'éclaire selon la scène, plus de constantes crépusculaires figées 
   adoucissement (sliders liés à `CanvasModel.brushRadius`/`brushSoftness`,
   appliqués aux prochains traits).
 - **Repeinte incrémentale** : `BrushPaint.metal` → `stamp_density_volume`
-  (texture `read_write`, max-combine) n'ajoute que les **nouveaux** dabs depuis
-  la dernière mise à jour ; `clear_density_volume` vide. `Renderer` suit
-  `stampedDabCount` → un trait qui s'allonge coûte O(nouveaux dabs), plus la
-  repeinte intégrale de l'étape 4. Volume passé en **R32Float** (accès read_write).
-- Vérifié : panneau pinceau affiché, nuage rendu depuis le volume read_write.
+  (max-combine) n'ajoute que les **nouveaux** dabs depuis la dernière mise à
+  jour ; `clear_density_volume` vide. `Renderer` suit `stampedDabCount` → un
+  trait qui s'allonge coûte O(nouveaux dabs), plus la repeinte intégrale de
+  l'étape 4. Incrémental via **ping-pong** de deux volumes **R8Unorm** (lit
+  l'un, écrit l'autre) — pas de `read_write`, donc format filtrable conservé.
+- Vérifié : panneau pinceau affiché, nuage rendu depuis le volume.
 
 ## Reste à faire
 
