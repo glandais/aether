@@ -13,11 +13,11 @@ Jamais « fun » ni enfantin.
 
 ## Vision
 
-L'utilisateur choisit un paysage (galerie curée ou photo personnelle), peint des
-silhouettes de nuages dans un canvas 2D simple, et un moteur de rendu
-volumétrique Metal transforme ces silhouettes en nuages 3D plausibles, éclairés
-par la position réelle du soleil et de la lune à l'endroit et à l'heure choisis.
-La météo réelle à ce point/instant informe l'état initial.
+L'utilisateur choisit un paysage dans une galerie curée, peint des silhouettes
+de nuages dans un canvas 2D simple, et un moteur de rendu volumétrique Metal
+transforme ces silhouettes en nuages 3D plausibles, éclairés par la position
+réelle du soleil et de la lune à l'endroit et à l'heure choisis. La météo réelle
+à ce point/instant informe l'état initial.
 
 Expérience visée : **contemplative, lente, satisfaisante**. Pas d'éditeur 3D
 complexe — une poignée de sliders au maximum.
@@ -29,10 +29,7 @@ complexe — une poignée de sliders au maximum.
 - **MetalKit** (`MTKView`) pour le canvas de rendu volumétrique
 - **Metal Shading Language** : raymarching, bruit 3D, composition
 - **WeatherKit** pour la météo (fallback **Open-Meteo**)
-- **CoreLocation** + **PhotosUI** : photo perso + extraction EXIF GPS/timestamp
-- **Vision** + modèle CoreML **Depth Anything** (converti) : depth estimation
-  des photos sans LiDAR
-- **ARKit / Scene depth** : photos prises avec LiDAR
+- **CoreLocation** : lieu de la scène (orientation du ciel)
 - **SwiftAA** : positions soleil/lune (fallback impl. interne formules Meeus)
 - **Swift Concurrency** (async/await, actors) — **pas de Combine, pas de RxSwift**
 - **SwiftPM uniquement**, pas de CocoaPods
@@ -63,7 +60,7 @@ xcodegen generate
 xcodebuild build -project Aether.xcodeproj -scheme Aether \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath build/dd
 
-# 3. Tests (métier : astro, météo, EXIF, éclairage…)
+# 3. Tests (métier : astro, météo, éclairage…)
 xcodebuild test -project Aether.xcodeproj -scheme Aether \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath build/dd
 
@@ -76,8 +73,8 @@ xcrun simctl io "$SIM" screenshot build/shot.png
 ```
 
 Le rendu Metal n'étant pas testable unitairement, **chaque étape se vérifie par
-capture d'écran sur simulateur**. Le `PhotosPicker` et les gestes ne se pilotent
-pas sans interaction : pour vérifier le rendu d'un paysage/nuage donné, injecter
+capture d'écran sur simulateur**. Les gestes ne se pilotent pas sans
+interaction : pour vérifier le rendu d'un paysage/nuage donné, injecter
 temporairement un `SceneContext` (ou un trait pré-peint dans `CanvasModel`),
 capturer, **puis retirer le code temporaire**.
 
@@ -98,11 +95,11 @@ capturer, **puis retirer le code temporaire**.
 | Couche | Rôle | Dépend de |
 |---|---|---|
 | `Aether/App/` | entry point SwiftUI, navigation racine | Features |
-| `Aether/Features/` | modules SwiftUI par feature (Canvas, Gallery, PhotoImport, Settings) | Domain, Services |
+| `Aether/Features/` | modules SwiftUI par feature (Canvas, Gallery, Settings) | Domain, Services |
 | `Aether/Rendering/` | pipeline Metal, shaders, volume textures | Domain **uniquement** |
 | `Aether/Domain/` | modèles purs (`Scene`, `CloudVolume`, `BrushStroke`, `Lighting`, `WeatherSnapshot`, `CelestialPosition`) | **rien** |
-| `Aether/Services/` | `WeatherService`, `AstroService`, `LocationService`, `DepthService` (protocoles + impl) | Domain |
-| `Aether/Resources/` | assets, paysages curés, modèles CoreML | — |
+| `Aether/Services/` | `WeatherService`, `AstroService`, `LocationService` (protocoles + impl) | Domain |
+| `Aether/Resources/` | assets, paysages curés | — |
 
 **Règles de dépendance :**
 - Domain ne dépend de rien.
@@ -142,9 +139,10 @@ Chaque étape doit être **visuellement vérifiable** avant de passer à la suiv
 
 ## Hors scope
 
-Partage social / comptes / backend · export vidéo ou animation · spécifique iPad
-au-delà de l'universal de base · localisation au-delà de fr/en · IAP, analytics,
-crash reporting.
+Import de photo personnelle (profondeur CoreML/LiDAR, EXIF, caméra calée sur la
+photo) · partage social / comptes / backend · export vidéo ou animation ·
+spécifique iPad au-delà de l'universal de base · localisation au-delà de fr/en ·
+IAP, analytics, crash reporting.
 
 ## État d'avancement
 
@@ -158,8 +156,8 @@ signature équipe. Build + test verts.
 - [x] Quad de test composité par-dessus en alpha blending (`TestQuad.metal`)
 - [x] Vérifiée visuellement sur simulateur (iPhone 17 Pro)
 
-Le paysage est un dégradé placeholder ; la galerie curée / l'import photo
-viendront alimenter `landscapeTexture`.
+Le paysage est un dégradé placeholder ; la galerie curée alimente
+`landscapeTexture`.
 
 **Étape 2 (raymarching nuage analytique) — terminée.**
 - [x] `Cloud.metal` : raymarching d'une sphère de bruit (densité analytique
@@ -218,9 +216,9 @@ Référence : Hillaire 2016, Patapom, Wallis, Scratchapixel (voir `BIBLIO.md`).
   d'intersection franche)
 - [x] Vérifiée visuellement sur simulateur (nuage occlus par l'horizon)
 
-Référence : ARKit sceneDepth, Depth Anything V2, soft particles (Wolfire/Flax),
-Hillaire 2016 (voir `BIBLIO.md` §4). La vraie profondeur (LiDAR / Depth Anything
-via `DepthService`) remplacera la depth map placeholder à l'import photo.
+Référence : soft particles (Wolfire/Flax), Hillaire 2016 (voir `BIBLIO.md` §4).
+La depth map synthétique des paysages curés (`LandscapeFactory`) remplace la
+depth map placeholder.
 
 **Étape 7 (demi-résolution + amortissement temporel) — terminée.**
 - [x] Raymarch rendu hors écran à demi-résolution (RGBA16Float HDR), puis
@@ -270,38 +268,18 @@ Référence : Hillaire 2016, Open-Meteo (voir `BIBLIO.md`).
 Toutes les étapes du pipeline sont implémentées et vérifiées visuellement / par
 tests.
 
-## Galerie + import photo — **terminé**
+## Galerie curée — **terminé**
 
-- **Navigation** : `RootView` → `GalleryView` (paysages curés + import) →
+- **Navigation** : `RootView` → `GalleryView` (paysages curés) →
   `CanvasView(context:)`. Un `SceneContext` (scène + image + depth map) circule
   de la Feature vers le `Renderer` (qui expose `setLandscape` / `setDepthMap` :
   Rendering ne dépend toujours que du Domain).
 - **Galerie curée** : `LandscapeFactory` génère des paysages *procéduraux*
-  (dégradés atmosphériques) + depth map synthétique. Presets dans
-  `CuratedLandscape.catalog` (lieu + heure → astro/météo).
-- **Import photo** (`PhotoImporter`) : `PhotosPicker` → décodage + orientation
-  EXIF, métadonnées EXIF (GPS, horodatage, cap, focale) → `Scene`, profondeur
-  via `CoreMLDepthService`.
-- **Profondeur réelle** : `CoreMLDepthService` (acteur) exécute Depth Anything V2
-  Small F16 (`Resources/Models/`, Apache-2.0) → `DepthMap` Domain ; mappée en
-  masque d'occlusion tolérant (BIBLIO §4) dans `setDepthMap`.
-- **Caméra calée sur la photo** : la caméra virtuelle reproduit la vraie.
-  - *Cap* (`GPSImgDirection`) → oriente le soleil relativement à la scène
-    (`CelestialPosition.cameraDirection`, Nord vs Sud).
-  - *Zoom* (focale 35 mm) → FOV vertical pilotant rayons + cadrage du volume.
-  - *Orientation / aspect* : la photo est affichée **aspect-fit** (lettrage,
-    `CanvasView`) à son ratio réel — aucune déformation paysage/portrait ; le
-    FOV vertical dépend de l'orientation (24 mm vs 36 mm). Paysages curés =
-    plein cadre (`displayAspect` nil).
-  - *Attitude* (tangage + roulis) reconstruite depuis l'`AccelerationVector`
-    (MakerNote Apple : vecteur « haut » dans le repère appareil). Tangage =
-    `asin(z)` (robuste à l'orientation) ; roulis = `atan2(x, −y)` moins la
-    rotation cardinale EXIF. Conventions validées sur photos iPhone réelles
-    (orientations 1 et 6). Incline la direction du soleil (`cameraDirection`).
-  - *Horodatage* : `OffsetTimeOriginal` (ex. "+02:00") donne l'UTC exact ;
-    repli longitude sinon.
-- Tests : EXIF GPS/horodatage, décalage UTC, FOV orientation/zoom, cap +
-  tangage + roulis du soleil, attitude depuis de vrais `AccelerationVector`.
+  (dégradés atmosphériques) + depth map synthétique (`DepthMap` Domain, mappée en
+  masque d'occlusion dans `setDepthMap`). Presets dans `CuratedLandscape.catalog`
+  (lieu + heure → astro/météo). Cadrage plein écran (`displayAspect` nil), FOV
+  par défaut (`Scene.defaultFieldOfView`).
+- **Horodatage** : `Scene.utcOffset` approximé par la longitude du preset.
 
 ## Éclairage selon la scène — **terminé**
 
@@ -344,7 +322,7 @@ Le nuage s'éclaire selon la scène, plus de constantes crépusculaires figées 
   hauteur de la lune et sa fraction éclairée (`AstroService.moonIlluminatedFraction`,
   SwiftAA). `CanvasView` fond soleil↔lune selon la hauteur du soleil (bande
   crépusculaire) ; nuit sans lune → nuage sombre (correct).
-- `Scene.utcOffset` : EXIF `OffsetTimeOriginal` (photos) ou approx. longitude (curés).
+- `Scene.utcOffset` : approx. longitude du preset curé.
 - Tests : `MoonLighting` (phase/hauteur, teinte froide), fraction éclairée ∈ [0,1].
 - Vérifié : scène curée scrutée midi → nuage blanc ; nuit → nuage sombre/froid.
 
@@ -377,7 +355,6 @@ Le nuage s'éclaire selon la scène, plus de constantes crépusculaires figées 
 
 - **Réglages** (`Features/Settings`) : choisir le **lieu** (l'heure est déjà
   réglable au canvas ; manque la sélection géographique manuelle).
-- **LiDAR / ARKit** comme source de profondeur alternative derrière `DepthService`.
 - **Fond de ciel dynamique** : le paysage est une image figée — il ne suit pas
   l'heure scrutée (seul le nuage se rallume). Ciel procédural = gros chantier.
 - **Profilage perf sur device réel** (étape 7 vérifiée structurellement seulement).

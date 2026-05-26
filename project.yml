@@ -46,9 +46,8 @@ targets:
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait"
         # Descriptions d'usage — registre sobre. Capabilities réelles (WeatherKit,
-        # Location, Photos) activées aux étapes 8/9 du pipeline.
+        # Location) activées aux étapes 8/9 du pipeline.
         INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: "Aether utilise votre position pour orienter le ciel : soleil, lune et lumière du lieu choisi."
-        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "Aether lit vos photos pour peindre des nuages au-dessus de vos propres paysages."
 
   AetherTests:
     type: bundle.unit-test

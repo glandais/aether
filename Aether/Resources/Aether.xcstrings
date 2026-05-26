@@ -3,23 +3,56 @@
   "strings" : {
     "action.clear" : {
       "comment" : "Bouton effaçant tous les nuages peints.",
+      "extractionState" : "stale",
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear" } },
-        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Effacer" } }
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Effacer"
+          }
+        }
       }
     },
     "action.redo" : {
       "comment" : "Accessibilité : bouton rétablir le trait annulé.",
+      "extractionState" : "stale",
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Redo" } },
-        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Rétablir" } }
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redo"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rétablir"
+          }
+        }
       }
     },
     "action.undo" : {
       "comment" : "Accessibilité : bouton annuler le dernier trait.",
+      "extractionState" : "stale",
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Undo" } },
-        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Annuler" } }
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Undo"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Annuler"
+          }
+        }
       }
     },
     "app.tagline" : {
@@ -53,24 +86,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Source météo"
-          }
-        }
-      }
-    },
-    "gallery.import" : {
-      "comment" : "Bouton important une photo personnelle.",
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Import a photo"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Importer une photo"
           }
         }
       }

@@ -530,8 +530,8 @@ final class Renderer: NSObject, MTKViewDelegate {
     /// Depth map placeholder du paysage (étape 6) : distance scène le long du
     /// rayon, par ligne d'écran. Ciel = lointain (le nuage passe devant) ; bande
     /// de sol en bas = proche et se rapprochant vers le bas (occlut le nuage).
-    /// Remplacé plus tard par la vraie profondeur (ARKit / Depth Anything via
-    /// `DepthService`).
+    /// La depth map synthétique des paysages curés (`LandscapeFactory`) la
+    /// remplace via `setDepthMap`.
     private static func makeDepthTexture(device: MTLDevice) -> MTLTexture? {
         let width = 1
         let height = 512

@@ -1,14 +1,9 @@
-import PhotosUI
 import SwiftUI
 
-/// Écran d'accueil : galerie de paysages curés + import d'une photo perso.
+/// Écran d'accueil : galerie de paysages curés.
 /// Chaque choix produit un `SceneContext` transmis via `onSelect`.
 struct GalleryView: View {
     var onSelect: (SceneContext) -> Void
-
-    @State private var photoItem: PhotosPickerItem?
-    @State private var isImporting = false
-    private let importer = PhotoImporter(depthService: CoreMLDepthService())
 
     private let columns = [GridItem(.adaptive(minimum: 150), spacing: 16)]
 
@@ -30,36 +25,7 @@ struct GalleryView: View {
                 .padding()
             }
             .navigationTitle("Aether")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    PhotosPicker(selection: $photoItem, matching: .images) {
-                        Label("gallery.import", systemImage: "photo.badge.plus")
-                    }
-                }
-            }
-            .overlay {
-                if isImporting {
-                    ProgressView()
-                        .controlSize(.large)
-                        .padding(24)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-                }
-            }
-            .onChange(of: photoItem) { _, item in
-                guard let item else { return }
-                Task { await importPhoto(item) }
-            }
         }
-    }
-
-    private func importPhoto(_ item: PhotosPickerItem) async {
-        isImporting = true
-        defer { isImporting = false }
-        guard let data = try? await item.loadTransferable(type: Data.self),
-              let context = try? await importer.makeContext(from: data) else {
-            return
-        }
-        onSelect(context)
     }
 }
 
