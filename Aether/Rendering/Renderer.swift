@@ -44,6 +44,15 @@ private struct SkyUniforms {
     var camRight: SIMD4<Float>
     var camUp: SIMD4<Float>
     var camForward: SIMD4<Float>
+    // Mer sous l'horizon (technique « Seascape » / TDM).
+    var sea0: SIMD4<Float>    // x: activée (0/1) ; y: niveau ; z: amplitude ; w: hachure
+    var sea1: SIMD4<Float>    // x: fréquence ; y: vitesse ; z: temps ; w: inutilisé
+    var seaBase: SIMD4<Float> // xyz: couleur eau profonde
+    var seaWater: SIMD4<Float> // xyz: teinte diffuse de l'eau
+    var moonDirection: SIMD4<Float> // xyz: direction monde de la lune ; w: poids nocturne
+    var moonGlint: SIMD4<Float>     // xyz: couleur du clair de lune (intensité comprise)
+    var skyZenith: SIMD4<Float>     // xyz: radiance ciel au zénith (intégrale CPU, linéaire)
+    var skyHorizon: SIMD4<Float>    // xyz: radiance ciel à l'horizon (intégrale CPU, linéaire)
 }
 
 /// Rendu de l'étape 4 : le paysage en texture de fond, surmonté d'un nuage dont
@@ -69,11 +78,16 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let sampler: MTLSamplerState
     private let startTime = CACurrentMediaTime()
     private let log = Logger(subsystem: "io.github.glandais.aether", category: "Renderer")
+    // Compteur d'images : moyenne le débit sur ~1 s et le journalise (os.log).
+    private var fpsWindowStart = CACurrentMediaTime()
+    private var fpsFrameCount = 0
 
     // Cibles demi-résolution ping-pong pour le raymarch amorti (étape 7).
     private var cloudTargets: [MTLTexture] = []
     private var cloudTargetWidth = 0
     private var cloudTargetHeight = 0
+    // Ciel + mer rendus hors écran à demi-résolution (HDR), upsamplés au composite.
+    private var skyTarget: MTLTexture?
     private var frameIndex = 0
     // Ordre de Bayer 2×2 : répartit les 4 cellules sur 4 frames.
     private static let activeOrder: [UInt32] = [0, 3, 1, 2]
@@ -95,6 +109,20 @@ final class Renderer: NSObject, MTKViewDelegate {
     // Paramètres météo (étape 9), résolus par la Feature depuis la météo
     // statique du paysage curé. Neutres avant la première mise à jour.
     private var cloudParameters = CloudParameters.neutral
+
+    // Mer rendue sous l'horizon (`.none` = paysage terrestre). Résolue par la
+    // Feature depuis le paysage curé.
+    private var sea = SeaSurface.none
+
+    // Lune (direction monde + clair de lune + poids nocturne) pour le reflet sur
+    // la mer la nuit. Résolue par la Feature.
+    private var moonSkyDirection = SIMD3<Float>(0, -1, 0)
+    private var moonGlint = SIMD3<Float>(0, 0, 0)
+    private var nightWeight: Float = 0
+
+    // Radiance du ciel (zénith / horizon) pour le reflet bon marché de la mer.
+    private var skyZenithRadiance = SIMD3<Float>(0, 0, 0)
+    private var skyHorizonRadiance = SIMD3<Float>(0, 0, 0)
 
     // tan(FOV vertical / 2) de la caméra de la scène (défaut ≈ 53°). Cale la
     // projection du ciel et le cadrage du volume sur le zoom de la photo.
@@ -149,10 +177,12 @@ final class Renderer: NSObject, MTKViewDelegate {
         do {
             // Ciel atmosphérique dynamique (suit le soleil). `background_vertex`
             // est le triangle plein écran partagé ; échantillonne le paysage
-            // sous l'horizon.
+            // sous l'horizon. Rendu **hors écran à demi-résolution** (comme le
+            // nuage) : la mer raymarchée y est coûteuse, l'upsample a lieu au
+            // passage composite. D'où le format HDR `cloudColorFormat`.
             skyPipeline = try Renderer.makePipeline(
                 device: device, vertex: backgroundVertex, fragment: skyFragment,
-                pixelFormat: format, blend: .none)
+                pixelFormat: Renderer.cloudColorFormat, blend: .none)
             // Le nuage est rendu hors écran (demi-rés, HDR), sans blending :
             // la composition « over » a lieu au passage composite.
             cloudPipeline = try Renderer.makePipeline(
@@ -239,6 +269,25 @@ final class Renderer: NSObject, MTKViewDelegate {
         self.skyGroundLight = groundLight
     }
 
+    /// Reçoit la surface de mer du paysage curé (rendue sous l'horizon).
+    func updateSea(_ sea: SeaSurface) {
+        self.sea = sea
+    }
+
+    /// Reçoit la lune (direction monde + clair de lune + poids nocturne) pour le
+    /// reflet/glint sur la mer la nuit.
+    func updateMoon(direction: SIMD3<Float>, glint: SIMD3<Float>, nightWeight: Float) {
+        self.moonSkyDirection = direction
+        self.moonGlint = glint
+        self.nightWeight = nightWeight
+    }
+
+    /// Reçoit la radiance du ciel (zénith / horizon) pour le reflet de la mer.
+    func updateSeaSky(zenith: SIMD3<Float>, horizon: SIMD3<Float>) {
+        self.skyZenithRadiance = zenith
+        self.skyHorizonRadiance = horizon
+    }
+
     /// Remplace le paysage de fond par l'image fournie (galerie ou photo).
     func setLandscape(_ image: CGImage) {
         let loader = MTKTextureLoader(device: device)
@@ -276,6 +325,16 @@ final class Renderer: NSObject, MTKViewDelegate {
     }
 
     func draw(in view: MTKView) {
+        // FPS : nombre d'images sur la dernière seconde, journalisé via os.log.
+        fpsFrameCount += 1
+        let now = CACurrentMediaTime()
+        let span = now - fpsWindowStart
+        if span >= 1.0 {
+            log.info("FPS \(Double(self.fpsFrameCount) / span, format: .fixed(precision: 1))")
+            fpsFrameCount = 0
+            fpsWindowStart = now
+        }
+
         let size = view.drawableSize
         let fullWidth = max(Int(size.width), 1)
         let fullHeight = max(Int(size.height), 1)
@@ -284,6 +343,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         ensureCloudTargets(width: halfWidth, height: halfHeight)
 
         guard cloudTargets.count == 2,
+              let skyTarget = skyTarget,
               let descriptor = view.currentRenderPassDescriptor,
               let drawable = view.currentDrawable,
               let commandBuffer = commandQueue.makeCommandBuffer() else {
@@ -294,10 +354,11 @@ final class Renderer: NSObject, MTKViewDelegate {
         let historyTarget = cloudTargets[(frameIndex + 1) % 2]
 
         let aspect = Float(fullWidth) / Float(fullHeight)
+        let elapsed = Float(CACurrentMediaTime() - startTime)
         let volumeHalfHeight = Renderer.volumeDistance * cameraTanHalfFov
         var uniforms = CloudUniforms(
             resolution: SIMD2(Float(halfWidth), Float(halfHeight)),
-            time: Float(CACurrentMediaTime() - startTime),
+            time: elapsed,
             aspect: aspect,
             // Direction du soleil résolue par l'AstroService (étape 8).
             sunDirection: SIMD4(sunDirection.x, sunDirection.y, sunDirection.z, 0.0),
@@ -330,11 +391,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         cloudEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         cloudEncoder.endEncoding()
 
-        // Passe 2 — composition plein écran : paysage + nuage demi-rés upsamplé.
-        guard let compositeEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
-            return
-        }
-        // Fond : ciel atmosphérique dynamique (suit le soleil), paysage sous l'horizon.
+        // Passe 2 — ciel atmosphérique + mer raymarchée, hors écran à demi-rés.
         var skyUniforms = SkyUniforms(
             sunDirection: SIMD4(skySunDirection.x, skySunDirection.y, skySunDirection.z, 0.0),
             rayleighScattering: SIMD4(
@@ -349,14 +406,39 @@ final class Renderer: NSObject, MTKViewDelegate {
             camera: SIMD4(cameraTanHalfFov, aspect, skyGroundLight, 0.0),
             camRight: SIMD4(cameraRight.x, cameraRight.y, cameraRight.z, 0.0),
             camUp: SIMD4(cameraUp.x, cameraUp.y, cameraUp.z, 0.0),
-            camForward: SIMD4(cameraForward.x, cameraForward.y, cameraForward.z, 0.0))
-        compositeEncoder.setRenderPipelineState(skyPipeline)
-        compositeEncoder.setFragmentBytes(&skyUniforms, length: MemoryLayout<SkyUniforms>.stride, index: 0)
-        compositeEncoder.setFragmentTexture(landscapeTexture, index: 0)
-        compositeEncoder.setFragmentSamplerState(sampler, index: 0)
+            camForward: SIMD4(cameraForward.x, cameraForward.y, cameraForward.z, 0.0),
+            sea0: SIMD4(sea.enabled ? 1.0 : 0.0, sea.level, sea.height, sea.choppy),
+            sea1: SIMD4(sea.frequency, sea.speed, elapsed, 0.0),
+            seaBase: SIMD4(sea.baseColor.x, sea.baseColor.y, sea.baseColor.z, 0.0),
+            seaWater: SIMD4(sea.waterColor.x, sea.waterColor.y, sea.waterColor.z, 0.0),
+            moonDirection: SIMD4(moonSkyDirection.x, moonSkyDirection.y, moonSkyDirection.z, nightWeight),
+            moonGlint: SIMD4(moonGlint.x, moonGlint.y, moonGlint.z, 0.0),
+            skyZenith: SIMD4(skyZenithRadiance.x, skyZenithRadiance.y, skyZenithRadiance.z, 0.0),
+            skyHorizon: SIMD4(skyHorizonRadiance.x, skyHorizonRadiance.y, skyHorizonRadiance.z, 0.0))
+
+        let skyPass = MTLRenderPassDescriptor()
+        skyPass.colorAttachments[0].texture = skyTarget
+        skyPass.colorAttachments[0].loadAction = .dontCare
+        skyPass.colorAttachments[0].storeAction = .store
+        guard let skyEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: skyPass) else {
+            return
+        }
+        skyEncoder.setRenderPipelineState(skyPipeline)
+        skyEncoder.setFragmentBytes(&skyUniforms, length: MemoryLayout<SkyUniforms>.stride, index: 0)
+        skyEncoder.setFragmentTexture(landscapeTexture, index: 0)
+        skyEncoder.setFragmentSamplerState(sampler, index: 0)
+        skyEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        skyEncoder.endEncoding()
+
+        // Passe 3 — composition plein écran : ciel+mer puis nuage, tous deux
+        // demi-rés upsamplés (bilinéaire) et composés « over » prémultiplié.
+        guard let compositeEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
+            return
+        }
+        compositeEncoder.setRenderPipelineState(compositePipeline)
+        compositeEncoder.setFragmentTexture(skyTarget, index: 0)
         compositeEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
 
-        compositeEncoder.setRenderPipelineState(compositePipeline)
         compositeEncoder.setFragmentTexture(writeTarget, index: 0)
         compositeEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         compositeEncoder.endEncoding()
@@ -445,6 +527,10 @@ final class Renderer: NSObject, MTKViewDelegate {
         for target in targets {
             clear(target)
         }
+
+        // Cible du ciel+mer (demi-rés, HDR), recréée avec les cibles nuage.
+        descriptor.usage = [.renderTarget, .shaderRead]
+        skyTarget = device.makeTexture(descriptor: descriptor)
     }
 
     private func clear(_ texture: MTLTexture) {

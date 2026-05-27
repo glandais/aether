@@ -437,8 +437,53 @@ non annulable) : on reframe un ciel vierge, puis on repeint.
   (`clearForCameraChange`, clamp tangage). Vérifié au simulateur (ciel
   panoramique + soleil qui se déplacent ; FOV étroit/large).
 
+## Mer raymarchée sous l'horizon — **terminé**
+
+Certains paysages curés portent une **mer animée** rendue sous l'horizon
+(raymarching de hauteur, technique « Seascape » d'Alexander Alekseev / TDM,
+Shadertoy `Ms2SD1`, portée en MSL — attribution conservée en en-tête de
+`Background.metal`). La caméra à regard libre la traverse naturellement
+(pivoter/baisser les yeux → on voit la houle).
+
+- **`Domain/SeaSurface.swift`** (pur) : `enabled`, `level` (hauteur de l'œil
+  au-dessus du plan de mer, m), `height`/`choppy`/`frequency`/`speed` (houle),
+  `baseColor`/`waterColor`. `.none` (terrestre) / `.calm` (registre contemplatif :
+  `choppy`/`speed` adoucis vs les défauts d'origine, œil à 3 m). Voyage
+  `CuratedLandscape` → `SceneContext` → `CanvasView` → `Renderer` en uniformes
+  (`SkyUniforms` étendu), comme `Atmosphere`. Activée sur Aube/Heure bleue/Plein
+  midi du catalogue.
+- **`Background.metal`** : la branche **sous-horizon** de `sky_background_fragment`
+  rend la mer (sinon la teinte de sol). Trace de hauteur sur le **rayon monde** de
+  la caméra libre (œil local en `(0, level, 0)`, surface moyenne en `y≈0`), normale
+  par différences finies, ombrage Fresnel + reflet de ciel + base + **glint
+  soleil** (vrai `sunDir`). La houle reste **world-locked** quand on balaye.
+  - *Cohérence ciel ↔ mer* : le reflet ne refait **pas** d'intégrale par pixel ;
+    c'est un **dégradé zénith↔horizon** dont les deux couleurs sont les intégrales
+    CPU de `Atmosphere` (déjà calculées pour l'ambiance du nuage), passées en
+    uniformes (`skyZenith`/`skyHorizon`). Chaud quand le soleil est bas, bleu haut.
+  - *Horizon propre* : l'eau lointaine se **dissout** vers le reflet d'horizon
+    (`smoothstep` sur la distance) → masque l'aliasing/spikes de la trace au ras
+    de l'horizon. Crêtes : tint clampé ≥ 0 (sinon stries noires dans les creux).
+  - *Nuit* : la partie solaire est assombrie par le facteur de sol ; un **clair de
+    lune** (moonglade spéculaire + voile, `MoonLighting` + direction monde de la
+    lune, *night-gated*) survit à cet assombrissement → reflet lunaire quand la
+    lune est levée et se reflète dans l'eau visible (lune haute ⇒ il faut baisser
+    les yeux, physiquement correct).
+- **Perf — demi-résolution.** Le raymarch de mer est coûteux. La passe
+  **ciel + mer** est désormais rendue **hors écran à demi-résolution** (HDR
+  `cloudColorFormat`, `skyTarget` créé avec les cibles nuage), puis upsamplée
+  (bilinéaire) et composée « over » au passage composite — comme le nuage. La
+  composition empile : ciel+mer upsamplé, puis nuage upsamplé. ~4× sur le coût
+  fragment dominant : **60 ips sur device** (iPhone 13 Pro Max) — vs ~5 ips en
+  plein écran avec intégrales par pixel, ~13 ips après réduction des intégrales,
+  60 ips une fois la passe en demi-rés.
+- **FPS** : `Renderer.draw` journalise les images/s (~1 s, os.log, subsystem
+  `io.github.glandais.aether`, catégorie `Renderer`) — `log stream --level info`.
+
 ## Reste à faire
 
 - **Réglages** (`Features/Settings`) : choisir le **lieu** (l'heure est déjà
   réglable au canvas ; manque la sélection géographique manuelle).
-- **Profilage perf sur device réel** (étape 7 vérifiée structurellement seulement).
+- **Profilage perf sur device réel** : mer demi-rés confirmée à 60 ips
+  (iPhone 13 Pro Max). Leviers de qualité si besoin : `SEA_ITER_FRAGMENT`,
+  résolution de la passe ciel+mer (½ → ⅔), nombre de pas de la trace.

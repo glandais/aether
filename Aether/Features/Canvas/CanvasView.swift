@@ -49,6 +49,16 @@ struct CanvasView: View {
         /// Éclairement du sol (0 nuit → 1 jour) : assombrit le paysage la nuit.
         var groundLight: Float
         var isDaytime: Bool
+        /// Direction monde de la lune (pour le reflet/glint sur la mer la nuit).
+        var moonSkyDirection: SIMD3<Float>
+        /// Couleur du clair de lune (intensité comprise), pour le glint marin.
+        var moonGlint: SIMD3<Float>
+        /// Poids nocturne (0 jour → 1 nuit) : ouvre les contributions lunaires.
+        var nightWeight: Float
+        /// Radiance du ciel au zénith et à l'horizon (intégrales CPU), pour le
+        /// reflet bon marché de la mer (dégradé, sans intégrale par pixel).
+        var skyZenithRadiance: SIMD3<Float>
+        var skyHorizonRadiance: SIMD3<Float>
     }
 
     var body: some View {
@@ -145,6 +155,13 @@ struct CanvasView: View {
         let sunWorld = sun.worldDirection
         let sunDayColor = atmosphere.sunTransmittance(sunDirection: sunWorld) * Self.cloudSunStrength
         let zenith = atmosphere.skyRadiance(viewDirection: SIMD3(0, 1, 0), sunDirection: sunWorld)
+        // Radiance du ciel près de l'horizon, dans l'azimut du soleil (pour la
+        // chaleur du reflet bas), avec repli vers le Nord si le soleil est haut.
+        let sunHoriz = SIMD3<Float>(sunWorld.x, 0, sunWorld.z)
+        let horizonDir = length(sunHoriz) > 0.05
+            ? normalize(SIMD3<Float>(sunHoriz.x, 0.08, sunHoriz.z))
+            : SIMD3<Float>(0, 0.08, -1)
+        let horizonRadiance = atmosphere.skyRadiance(viewDirection: horizonDir, sunDirection: sunWorld)
         let zenithLuma = 0.2126 * zenith.x + 0.7152 * zenith.y + 0.0722 * zenith.z
         let ambientDayColor =
             (SIMD3(repeating: zenithLuma) + (zenith - SIMD3(repeating: zenithLuma)) * Self.ambientSaturation)
@@ -161,7 +178,12 @@ struct CanvasView: View {
 
         return ResolvedLight(
             direction: direction, skySunDirection: sun.worldDirection,
-            color: color, ambient: ambient, groundLight: groundLight, isDaytime: sunWeight >= 0.5)
+            color: color, ambient: ambient, groundLight: groundLight, isDaytime: sunWeight >= 0.5,
+            moonSkyDirection: moon.worldDirection,
+            moonGlint: moonLight.color * exposure,
+            nightWeight: 1 - sunWeight,
+            skyZenithRadiance: zenith,
+            skyHorizonRadiance: horizonRadiance)
     }
 
     /// FOV effectif : valeur pincée si présente, sinon celui de la scène.
@@ -194,6 +216,12 @@ struct CanvasView: View {
             sunColor: light.color,
             skyAmbient: light.ambient,
             cloudParameters: context.cloudParameters,
+            sea: context.sea,
+            moonSkyDirection: light.moonSkyDirection,
+            moonGlint: light.moonGlint,
+            nightWeight: light.nightWeight,
+            skyZenithRadiance: light.skyZenithRadiance,
+            skyHorizonRadiance: light.skyHorizonRadiance,
             cameraTanHalfFov: tanHalfFieldOfView,
             cameraRight: basis.right,
             cameraUp: basis.up,

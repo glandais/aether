@@ -12,6 +12,8 @@ struct CuratedLandscape: Identifiable {
     /// Météo figée du paysage (plus de récupération réseau) : informe la
     /// couverture et l'opacité initiales du nuage peint.
     let weather: WeatherSnapshot
+    /// Mer rendue sous l'horizon pour ce paysage (`.none` = terrestre).
+    var sea: SeaSurface = .none
 
     func makeContext() -> SceneContext? {
         guard let image = LandscapeFactory.image(palette: palette) else { return nil }
@@ -22,7 +24,8 @@ struct CuratedLandscape: Identifiable {
         return SceneContext(
             scene: scene, landscape: image, displayAspect: nil,
             skyExposure: SkyExposure.estimate(from: image),
-            cloudParameters: CloudParameters(weather: weather))
+            cloudParameters: CloudParameters(weather: weather),
+            sea: sea)
     }
 }
 
@@ -48,7 +51,8 @@ extension CuratedLandscape {
             date: utc(2026, 5, 25, 20, 0),
             weather: WeatherSnapshot(
                 condition: .clear, cloudCover: 0.20, humidity: 0.55,
-                windSpeed: 2, temperature: 14)),
+                windSpeed: 2, temperature: 14),
+            sea: .calm),
         CuratedLandscape(
             title: "Heure bleue",
             palette: LandscapeFactory.Palette(
@@ -58,7 +62,8 @@ extension CuratedLandscape {
             date: utc(2026, 5, 25, 22, 30),
             weather: WeatherSnapshot(
                 condition: .overcast, cloudCover: 0.85, humidity: 0.80,
-                windSpeed: 8, temperature: 7)),
+                windSpeed: 8, temperature: 7),
+            sea: .calm),
         CuratedLandscape(
             title: "Plein midi",
             palette: LandscapeFactory.Palette(
@@ -68,7 +73,8 @@ extension CuratedLandscape {
             date: utc(2026, 5, 25, 2, 0),
             weather: WeatherSnapshot(
                 condition: .partlyCloudy, cloudCover: 0.30, humidity: 0.45,
-                windSpeed: 5, temperature: 24))
+                windSpeed: 5, temperature: 24),
+            sea: .calm)
     ]
 
     private static func rgb(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> CGColor {

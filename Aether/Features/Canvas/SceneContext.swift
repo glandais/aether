@@ -16,4 +16,6 @@ struct SceneContext: Identifiable {
     var skyExposure: Float = 0.6
     /// Paramètres de rendu dérivés de la météo statique du paysage curé.
     var cloudParameters: CloudParameters = .neutral
+    /// Mer rendue sous l'horizon (`.none` = paysage terrestre).
+    var sea: SeaSurface = .none
 }

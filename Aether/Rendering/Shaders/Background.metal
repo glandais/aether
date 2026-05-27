@@ -31,6 +31,14 @@ struct SkyUniforms {
     float4 camRight;           // xyz: camera→world basis (gaze yaw + pitch)
     float4 camUp;
     float4 camForward;         // xyz: gaze direction (-Z when upright/North)
+    float4 sea0;               // x: enabled (0/1); y: level; z: wave height; w: choppy
+    float4 sea1;               // x: frequency; y: speed; z: time; w: unused
+    float4 seaBase;            // xyz: deep-water base colour
+    float4 seaWater;           // xyz: water diffuse tint
+    float4 moonDirection;      // xyz: world direction to the moon; w: night weight (0 day → 1 night)
+    float4 moonGlint;          // xyz: moonlight colour (intensity included)
+    float4 skyZenith;          // xyz: sky radiance at the zenith (CPU integral, linear HDR)
+    float4 skyHorizon;         // xyz: sky radiance near the horizon (CPU integral, linear HDR)
 };
 
 // Fullscreen triangle generated from the vertex id — no vertex buffer needed.
@@ -151,6 +159,165 @@ static float3 computeSkyRadiance(float3 origin, float3 rayDir, float3 sunDir,
            (rayleighSum * betaR * phaseR + mieSum * betaM * phaseM);
 }
 
+// --- Sea surface (heightmap raymarching) ------------------------------------
+//
+// Ported from "Seascape" by Alexander Alekseev aka TDM (2014),
+// https://www.shadertoy.com/view/Ms2SD1 — CC BY-NC-SA 3.0. The original's flying
+// camera, analytic sky and post gamma are dropped: the sea is traced along
+// Aether's world-space view ray, lit by the real (AstroService) sun, and
+// reflects Aether's own atmospheric sky (computeSkyRadiance) so the water stays
+// coherent with the background above the horizon.
+
+constant int SEA_NUM_STEPS = 6;
+constant int SEA_ITER_GEOMETRY = 2;
+constant int SEA_ITER_FRAGMENT = 4;
+constant float2x2 SEA_OCTAVE_M = float2x2(1.6, 1.2, -1.2, 1.6);
+
+struct SeaParams {
+    float level;     // eye height above the mean surface (world units)
+    float height;    // wave amplitude
+    float choppy;    // crest sharpness
+    float freq;      // spatial frequency
+    float seaTime;   // animated phase (1 + time * speed)
+    float3 base;     // deep-water colour
+    float3 water;    // diffuse water tint
+};
+
+static float seaHash(float2 p) {
+    float h = dot(p, float2(127.1, 311.7));
+    return fract(sin(h) * 43758.5453123);
+}
+
+static float seaNoise(float2 p) {
+    float2 i = floor(p);
+    float2 f = fract(p);
+    float2 u = f * f * (3.0 - 2.0 * f);
+    return -1.0 + 2.0 * mix(
+        mix(seaHash(i + float2(0.0, 0.0)), seaHash(i + float2(1.0, 0.0)), u.x),
+        mix(seaHash(i + float2(0.0, 1.0)), seaHash(i + float2(1.0, 1.0)), u.x), u.y);
+}
+
+static float seaOctave(float2 uv, float choppy) {
+    uv += seaNoise(uv);
+    float2 wv = 1.0 - abs(sin(uv));
+    float2 swv = abs(cos(uv));
+    wv = mix(wv, swv, wv);
+    return pow(1.0 - pow(wv.x * wv.y, 0.65), choppy);
+}
+
+// Signed height field: distance from the sample point to the wave surface
+// (negative below, positive above). `iters` trades detail for speed (geometry
+// pass during tracing vs. fragment pass for the normal).
+static float seaMapHeight(float3 p, SeaParams sp, int iters) {
+    float freq = sp.freq;
+    float amp = sp.height;
+    float choppy = sp.choppy;
+    float2 uv = p.xz; uv.x *= 0.75;
+    float d, h = 0.0;
+    for (int i = 0; i < iters; ++i) {
+        d  = seaOctave((uv + sp.seaTime) * freq, choppy);
+        d += seaOctave((uv - sp.seaTime) * freq, choppy);
+        h += d * amp;
+        uv = SEA_OCTAVE_M * uv; freq *= 1.9; amp *= 0.22;
+        choppy = mix(choppy, 1.0, 0.2);
+    }
+    return p.y - h;
+}
+
+static float3 seaNormal(float3 p, float eps, SeaParams sp) {
+    float3 n;
+    n.y = seaMapHeight(p, sp, SEA_ITER_FRAGMENT);
+    n.x = seaMapHeight(float3(p.x + eps, p.y, p.z), sp, SEA_ITER_FRAGMENT) - n.y;
+    n.z = seaMapHeight(float3(p.x, p.y, p.z + eps), sp, SEA_ITER_FRAGMENT) - n.y;
+    n.y = eps;
+    return normalize(n);
+}
+
+// False-position march toward the wave surface; converges fast for a height map.
+static float seaTrace(float3 ori, float3 dir, SeaParams sp, thread float3 &p) {
+    float tm = 0.0;
+    float tx = 1000.0;
+    float hx = seaMapHeight(ori + dir * tx, sp, SEA_ITER_GEOMETRY);
+    if (hx > 0.0) { p = ori + dir * tx; return tx; }
+    float hm = seaMapHeight(ori, sp, SEA_ITER_GEOMETRY);
+    float tmid = 0.0;
+    for (int i = 0; i < SEA_NUM_STEPS; ++i) {
+        tmid = mix(tm, tx, hm / (hm - hx));
+        p = ori + dir * tmid;
+        float hmid = seaMapHeight(p, sp, SEA_ITER_GEOMETRY);
+        if (hmid < 0.0) { tx = tmid; hx = hmid; }
+        else { tm = tmid; hm = hmid; }
+    }
+    return tmid;
+}
+
+static float seaDiffuse(float3 n, float3 l, float p) {
+    return pow(dot(n, l) * 0.4 + 0.6, p);
+}
+
+static float seaSpecular(float3 n, float3 l, float3 e, float s) {
+    float nrm = (s + 8.0) / (PI * 8.0);
+    return pow(max(dot(reflect(e, n), l), 0.0), s) * nrm;
+}
+
+// Cheap reflected-sky colour for the water: a zenith↔horizon gradient built from
+// two CPU-side atmospheric integrals (sky.skyZenith / sky.skyHorizon), tonemapped
+// like the background. Avoids a full per-pixel sky integral inside the sea march
+// (the dominant cost), while staying coherent with the sky above the horizon.
+static float3 seaReflectedSky(float3 reflDir, constant SkyUniforms &sky) {
+    const float t = clamp(reflDir.y, 0.0, 1.0);
+    const float3 radiance = mix(sky.skyHorizon.xyz, sky.skyZenith.xyz, t);
+    return 1.0 - exp(-radiance * sky.radii.w);
+}
+
+// Shade a traced water point. `eye` is the (normalised) world view ray, `sunDir`
+// the world direction to the sun. Output is in display range (matches the
+// tonemapped skyColor), so it blends seamlessly across the horizon.
+static float3 seaShade(float3 p, float3 n, float3 eye, float3 sunDir,
+                       SeaParams sp, constant SkyUniforms &sky) {
+    float fresnel = clamp(1.0 - dot(n, -eye), 0.0, 1.0);
+    fresnel = min(fresnel * fresnel * fresnel, 0.5);
+
+    // Reflected sky (cheap gradient approximation, see seaReflectedSky).
+    float3 reflDir = reflect(eye, n);
+    reflDir.y = max(reflDir.y, 0.0);   // keep the reflection in the sky hemisphere
+    float3 reflected = seaReflectedSky(reflDir, sky);
+
+    // Day factor: sun above the horizon lights the water; below → night.
+    float dayFactor = clamp(sunDir.y * 4.0 + 0.1, 0.0, 1.0);
+
+    float3 refracted = sp.base + seaDiffuse(n, sunDir, 80.0) * sp.water * 0.12 * dayFactor;
+    float3 color = mix(refracted, reflected, fresnel);
+
+    // Near-field crest tint, faded with distance (eye at local origin). Clamped
+    // to the crests only: the raw (p.y - height) goes negative in troughs, which
+    // multiplied by the water tint produced black streaks at this low eye height.
+    float atten = max(1.0 - dot(p, p) * 0.001, 0.0);
+    color += sp.water * max(p.y - sp.height, 0.0) * 0.18 * atten * dayFactor;
+
+    // Sun glint (specular), daytime only.
+    color += seaSpecular(n, sunDir, eye, 60.0) * dayFactor;
+
+    // Dim the sun/sky-lit appearance at night (ground-light factor), so the
+    // constant base water doesn't stay bright under a dark sky.
+    color *= sky.camera.z;
+
+    // Moonlight: a cool moonglade (specular streak broadened by the waves) plus
+    // a faint sheen on water facing the moon. Night-gated and scaled by the
+    // moonlight colour, so it survives the ground-light dimming above and only
+    // appears once the moon is up at night.
+    const float3 moonDir = normalize(sky.moonDirection.xyz);
+    const float nightW = sky.moonDirection.w;
+    if (sky.moonDirection.y > 0.0 && nightW > 0.0) {
+        const float3 moonColor = sky.moonGlint.xyz;
+        const float glade = seaSpecular(n, moonDir, eye, 300.0);
+        const float sheen = seaDiffuse(n, moonDir, 40.0) * fresnel * 0.15;
+        color += moonColor * (glade + sheen) * nightW;
+    }
+
+    return color;
+}
+
 fragment float4 sky_background_fragment(BackgroundInOut in [[stage_in]],
                                         constant SkyUniforms &sky [[buffer(0)]],
                                         texture2d<float> landscape [[texture(0)]],
@@ -173,22 +340,57 @@ fragment float4 sky_background_fragment(BackgroundInOut in [[stage_in]],
     const float3 origin = float3(0.0, sky.radii.x + sky.radii.z, 0.0);
     const float3 sunDir = normalize(sky.sunDirection.xyz);
 
-    const float3 radiance = computeSkyRadiance(origin, rayDir, sunDir, sky);
-
-    // Tonemap the HDR sky to display range (simple exponential exposure).
+    // Tonemap the HDR sky to display range (simple exponential exposure). Skip
+    // the (costly) integral well below the horizon, where the sky is fully
+    // occluded by the sea/ground and only its faint cross-fade near the horizon
+    // line would ever use it.
     const float exposure = sky.radii.w;
-    const float3 skyColor = 1.0 - exp(-radiance * exposure);
+    float3 skyColor = float3(0.0);
+    if (rayDir.y > -0.05) {
+        const float3 radiance = computeSkyRadiance(origin, rayDir, sunDir, sky);
+        skyColor = 1.0 - exp(-radiance * exposure);
+    }
 
-    // Below the horizon: a single meaningful ground tone — the palette's ground
-    // colour (bottom row of the landscape gradient), gently darkening as the
-    // gaze points further down. Anchored to the view angle (rayDir.y), not to
-    // the screen, so pitching the gaze can't expose the baked vertical gradient
-    // (a spurious second sky / bright band) as a screen-locked sample would.
-    // Dimmed by the ground-light factor so it darkens at night with the sky.
-    const float3 groundColor = landscape.sample(smp, float2(0.5, 1.0)).rgb;
-    const float belowness = clamp(-rayDir.y * 1.5, 0.0, 1.0);
-    const float3 ground = groundColor * mix(1.0, 0.55, belowness) * sky.camera.z;
+    // Below the horizon: either a raymarched sea (when the curated landscape
+    // enables one) or a single meaningful ground tone. Both are anchored to the
+    // view angle (rayDir.y), not the screen, so pitching the gaze can't expose
+    // the baked vertical gradient, and both are dimmed by the ground-light
+    // factor so they darken at night with the sky.
+    float3 below;
+    if (sky.sea0.x > 0.5 && rayDir.y < 0.06) {
+        // Local frame: eye at origin lifted by `level`, mean surface near y = 0,
+        // so descending rays (rayDir.y < 0) intersect the waves. The view ray is
+        // already world-space, so the swell stays world-locked as the gaze pans.
+        SeaParams sp;
+        sp.level = sky.sea0.y;
+        sp.height = sky.sea0.z;
+        sp.choppy = sky.sea0.w;
+        sp.freq = sky.sea1.x;
+        sp.seaTime = 1.0 + sky.sea1.z * sky.sea1.y;
+        sp.base = sky.seaBase.xyz;
+        sp.water = sky.seaWater.xyz;
+
+        const float3 ro = float3(0.0, sp.level, 0.0);
+        float3 p;
+        seaTrace(ro, rayDir, sp, p);
+        const float eps = dot(p, p) * (0.1 / max(sky.camera.x, 1e-3)) * 1e-3;
+        const float3 n = seaNormal(p, max(eps, 1e-3), sp);
+        const float3 seaCol = seaShade(p, n, rayDir, sunDir, sp, sky);
+
+        // Dissolve distant water into the atmospheric horizon. Near the horizon
+        // the height trace hits very far away where the march no longer converges
+        // and the wave detail aliases into spikes; fading toward the flat-water
+        // horizon reflection there yields a clean, hazy horizon (free — same
+        // gradient as the reflected sky, with the surface flat = normal up).
+        const float dist = length(p - ro);
+        const float3 horizon = seaReflectedSky(float3(0.0, 0.03, 0.0), sky);
+        below = mix(seaCol, horizon, smoothstep(150.0, 800.0, dist));
+    } else {
+        const float3 groundColor = landscape.sample(smp, float2(0.5, 1.0)).rgb;
+        const float belowness = clamp(-rayDir.y * 1.5, 0.0, 1.0);
+        below = groundColor * mix(1.0, 0.55, belowness) * sky.camera.z;
+    }
     const float blend = smoothstep(-0.01, 0.04, rayDir.y);
 
-    return float4(mix(ground, skyColor, blend), 1.0);
+    return float4(mix(below, skyColor, blend), 1.0);
 }
