@@ -380,21 +380,29 @@ nuage (demi-rés + temporel). Passer à des LUT Hillaire-2020 seulement si le
 profilage device l'exige ; toute LUT échantillonnée `filter::linear` doit être
 `RGBA16Float` (pas `R32Float`, cf. pièges connus).
 
-**Encore ouvert** :
-- *Réglage* : exposition (`Renderer.skyExposure`), nombre de pas, et défauts
-  `earth` sont des points de départ ; l'horizon de midi tire un peu vert/jaune,
-  le crépuscule s'assombrit vite (diffusion simple, pas de multi-scattering ni
-  d'afterglow). À affiner par capture.
-- *Cohérence (intérêt réel, non fait)* : dériver `SkyLighting.ambient` / teinte
-  soleil du **même** intégrale et multiplier le soleil reçu par le nuage par la
-  transmittance-au-soleil → une seule atmosphère pilote fond, ambiance et
-  éclairage du nuage, au lieu de la courbe `SkyLighting` accordée à la main.
-  Les stops `skyLow`/`skyHigh` des palettes deviendraient calculés.
+**Cohérence ciel ↔ nuage — fait.** Le nuage est éclairé par la **même**
+atmosphère que le fond (port CPU de l'intégrale dans `Atmosphere`, ~2 marches
+par frame) :
+- *Soleil du nuage* = `Atmosphere.sunTransmittance(sunDirection:)` × échelle →
+  chaud quand le soleil est bas (comme le ciel), blanc haut, nul sous l'horizon.
+- *Ambiance du nuage* = `Atmosphere.skyRadiance(viewDirection: zénith,…)`,
+  désaturée (`ambientSaturation`) pour ne pas griser le corps du nuage.
+- Fondu vers la `MoonLighting` la nuit (via `sunWeight`). `CanvasView` calcule
+  tout ; les échelles `cloudSunStrength`/`cloudAmbientStrength` ne font que caler
+  la luminosité (la teinte vient de la physique).
+- Vérifié : midi → nuage à crête blanche / base gris-bleu (cumulus réaliste) ;
+  soleil bas → nuage doré, cohérent avec le ciel ; nuit → sombre/lunaire.
+- Tests : `AtmosphereTests` (transmittance chaude/sombre/occlusion, radiance ciel).
+
+**Encore ouvert (réglage)** : exposition (`Renderer.skyExposure`), nb de pas,
+échelles nuage et défauts `earth` sont des points de départ ; l'horizon de midi
+tire un peu vert/jaune, le crépuscule s'assombrit vite (diffusion simple, pas de
+multi-scattering ni d'afterglow). `SkyLighting` n'est plus utilisé pour le nuage
+(seul son `smoothstep` sert encore de `sunWeight`) ; les stops `skyLow`/`skyHigh`
+des palettes pourraient devenir calculés. À affiner par capture.
 
 ## Reste à faire
 
 - **Réglages** (`Features/Settings`) : choisir le **lieu** (l'heure est déjà
   réglable au canvas ; manque la sélection géographique manuelle).
-- **Ciel ↔ nuage cohérents** : brancher l'éclairage du nuage sur l'intégrale
-  atmosphère (voir section ci-dessus), + réglage des constantes du ciel.
 - **Profilage perf sur device réel** (étape 7 vérifiée structurellement seulement).

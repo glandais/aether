@@ -16,6 +16,16 @@ struct CanvasView: View {
     @State private var showBrushControls = false
 
     private let astro = SwiftAAAstroService()
+    private let atmosphere = Atmosphere.earth
+
+    // Échelles ramenant la radiance atmosphérique dans la plage de travail du
+    // nuage (réglées par capture). La couleur/teinte vient de l'atmosphère ; ces
+    // facteurs ne font que caler la luminosité.
+    private static let cloudSunStrength: Float = 12
+    private static let cloudAmbientStrength: Float = 1.2
+    /// Désaturation de l'ambiance bleue du ciel (0 = gris, 1 = bleu ciel pur),
+    /// pour éviter que le corps du nuage ne vire au gris-bleu.
+    private static let ambientSaturation: Float = 0.5
 
     /// Éclairage résolu pour l'instant courant : direction, couleur, ambiance.
     private struct ResolvedLight {
@@ -81,7 +91,6 @@ struct CanvasView: View {
 
         // 1 quand le soleil est levé, 0 la nuit ; fondu dans la bande crépusculaire.
         let sunWeight = SkyLighting.smoothstep(-0.08, 0.06, Float(sun.altitude))
-        let sky = SkyLighting(sunAltitude: sun.altitude)
         let moonLight = MoonLighting(moonAltitude: moon.altitude, illuminatedFraction: illumination)
 
         let sunDir = sun.cameraDirection(
@@ -92,9 +101,21 @@ struct CanvasView: View {
         // Soleil et lune opposés : le mélange peut s'annuler → repli sur le dominant.
         direction = length(direction) < 0.01 ? (sunWeight >= 0.5 ? sunDir : moonDir) : normalize(direction)
 
+        // Éclairage du nuage dérivé de la **même** atmosphère que le ciel :
+        // soleil = transmittance solaire (chaud bas, blanc haut, nul la nuit) ;
+        // ambiance = radiance du ciel au zénith (bleue le jour), désaturée pour
+        // garder un nuage clair plutôt que gris-bleu.
+        let sunWorld = sun.worldDirection
+        let sunDayColor = atmosphere.sunTransmittance(sunDirection: sunWorld) * Self.cloudSunStrength
+        let zenith = atmosphere.skyRadiance(viewDirection: SIMD3(0, 1, 0), sunDirection: sunWorld)
+        let zenithLuma = 0.2126 * zenith.x + 0.7152 * zenith.y + 0.0722 * zenith.z
+        let ambientDayColor =
+            (SIMD3(repeating: zenithLuma) + (zenith - SIMD3(repeating: zenithLuma)) * Self.ambientSaturation)
+            * Self.cloudAmbientStrength
+
         let exposure = context.skyExposure
-        let color = (sky.sunColor * sunWeight + moonLight.color * (1 - sunWeight)) * exposure
-        let ambient = (sky.ambient * sunWeight + moonLight.ambient * (1 - sunWeight)) * exposure
+        let color = (sunDayColor * sunWeight + moonLight.color * (1 - sunWeight)) * exposure
+        let ambient = (ambientDayColor * sunWeight + moonLight.ambient * (1 - sunWeight)) * exposure
         return ResolvedLight(
             direction: direction, skySunDirection: sun.worldDirection,
             color: color, ambient: ambient, isDaytime: sunWeight >= 0.5)
@@ -112,7 +133,7 @@ struct CanvasView: View {
             strokes: model.strokes,
             sunDirection: light.direction,
             skySunDirection: light.skySunDirection,
-            atmosphere: .earth,
+            atmosphere: atmosphere,
             sunColor: light.color,
             skyAmbient: light.ambient,
             cloudParameters: context.cloudParameters,
