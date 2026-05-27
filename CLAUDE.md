@@ -521,6 +521,44 @@ et suivant le regard/zoom *gratuitement* puisque le rayon de vue est en monde).
   coucher → soleil bas rougi ; nuit → lune gibbeuse (~75 %) avec terminateur,
   *mottling* et *earthshine*.
 
+## Étoiles dessinées dans le ciel — **terminé**
+
+Le ciel dessine les étoiles du **Yale Bright Star Catalog** (BSC5, ~9 110 étoiles).
+Contrairement au soleil et à la lune, ce sont de **purs points passifs** : ils
+**n'éclairent rien** (pas de halo, pas de contribution atmosphère/nuage). Ils
+sont *night-gated* (s'allument quand le ciel s'assombrit), **occlus par les
+nuages**, et **world-locked** (suivent le regard/zoom comme le reste du ciel).
+
+- **Donnée** : `Aether/Resources/bsc5.bin` (binaire compact little-endian, 16 o/étoile :
+  `ra_rad, dec_rad, vmag, bv`), généré depuis la source ADC/Harvard par
+  `scripts/build_star_catalog.py` (provenance/attribution → `BIBLIO.md`).
+  Embarqué via `sources: [path: Aether]` (pas de changement `project.yml`).
+- **`Domain/StarCatalog.swift`** (pur, testé) : `load()` (décodage binaire),
+  `localSiderealTime` (GMST de Meeus depuis la date julienne + longitude Est),
+  `visibleStars` (équatorial J2000 → horizontal via angle horaire + latitude,
+  réutilise `CelestialPosition.worldDirection` ; émet jusqu'à ~−1° d'altitude, le
+  fondu fin se fait au shader). Aucune dépendance Services ; précession/nutation/
+  réfraction négligées (sous l'échelle d'un point).
+- **Feature** (`CanvasView`) : catalogue chargé une fois (statique). Les directions
+  monde sont recalculées **hors `body`** via `.task(id: StarKey)` (lieu + tranche
+  de temps ~60 s) — **jamais** par frame de rotation/zoom (qui ne changent que la
+  base caméra, appliquée côté GPU). Un `starRevision` croissant fait que le
+  `Renderer` ne reconstruit le buffer que sur changement réel.
+- **Rendering** : `Renderer.updateStars(_:revision:)` ; les points sont dessinés
+  dans la **passe composite plein écran**, **entre** l'upsample du ciel et le
+  nuage (blend **additif**), donc au-dessus du ciel et occlus par le nuage qui
+  suit. `Stars.metal` (`star_vertex`/`star_fragment`) : projection du `worldDirection`
+  par inversion du rayon de `Background.metal` (mêmes `camRight/Up/Forward` +
+  `tanHalfFov`/aspect → coïncidence au pixel près), rejet par le clip si derrière
+  la caméra ; magnitude → luminosité (flux de Pogson compressé en √) et taille du
+  *point sprite* (mise à l'échelle douce du zoom) ; **teinte réelle par indice
+  B-V** (bleu → blanc → orangé) ; **scintillement subtil** (phase par étoile) ;
+  fondu d'horizon (`smoothstep` sur `direction.y`) ; *night-gate* (`nightWeight`).
+- Tests : `StarCatalogTests` (pôle céleste → altitude = latitude ; équateur au
+  méridien → Sud ; sous l'horizon écarté ; LST borné et ~15°/h ; décodage binaire).
+  Vérifié au simulateur (nuit Paris) : champ d'étoiles colorées au-dessus de
+  l'horizon, scintillant ; occultées par une bande de nuage peinte ; absentes le jour.
+
 ## Reste à faire
 
 - **Réglages** (`Features/Settings`) : choisir le **lieu** (l'heure est déjà

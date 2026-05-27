@@ -226,6 +226,22 @@ d'une estimation monoculaire (galerie curée / photo sans LiDAR via CoreML).
 
 ---
 
+## 7. Données astronomiques externes
+
+### Yale Bright Star Catalog (BSC5) — étoiles dessinées dans le ciel
+
+- Hoffleit & Warren — *Bright Star Catalogue, 5th Revised Ed.* (1991), distribué
+  par l'Astronomical Data Center / Harvard :
+  http://tdc-www.harvard.edu/catalogs/bsc5.html
+- ~9 110 étoiles à largeur fixe (HR, position B1900/J2000, Vmag, indice B-V…).
+  Aether en extrait position J2000 + Vmag + B-V → binaire compact `bsc5.bin`
+  (`scripts/build_star_catalog.py`), résolu en directions monde par temps sidéral
+  local (GMST, Meeus chap. 12) + latitude — `Aether/Domain/StarCatalog.swift`.
+- Rendu : points additifs *passifs* (sans éclairage), teintés par B-V, night-gated
+  et occlus par les nuages — `Aether/Rendering/Shaders/Stars.metal`.
+
+---
+
 ## Correspondance pipeline Aether → références prioritaires
 
 | Étape (CLAUDE.md) | Références à lire |

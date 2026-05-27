@@ -21,6 +21,14 @@ struct CanvasView: View {
     /// FOV au début d'un pincement, et garde anti-trait pendant le zoom.
     @State private var fovAnchor: Double?
     @State private var isZooming = false
+    /// Étoiles visibles résolues pour le lieu/heure courant, et leur révision.
+    /// Recalculées seulement quand `starKey` change (cf. `.task`), jamais par
+    /// frame de rotation/zoom.
+    @State private var starField: [VisibleStar] = []
+    @State private var starRevision = 0
+
+    /// Catalogue BSC5 chargé une seule fois (paresseux, partagé).
+    private static let starCatalog: [Star] = StarCatalog.load()
 
     /// Plage de FOV au pincement (≈25°…100°).
     private static let minFieldOfView = 0.44
@@ -92,6 +100,34 @@ struct CanvasView: View {
             }
             .padding(.trailing, 16).padding(.top, 8)
         }
+        // Recalcul des étoiles hors `body` : seulement au changement de lieu/heure
+        // (bucket ~60 s), pas à chaque frame de rotation/zoom.
+        .task(id: starKey) { recomputeStars() }
+    }
+
+    /// Clé de recalcul des étoiles : lieu + tranche de temps (~60 s ; la rotation
+    /// sidérale ~0,25°/min reste sous le pixel).
+    private struct StarKey: Hashable {
+        let latitude: Double
+        let longitude: Double
+        let timeBucket: Int
+    }
+
+    private var starKey: StarKey {
+        StarKey(
+            latitude: context.scene.coordinate.latitude,
+            longitude: context.scene.coordinate.longitude,
+            timeBucket: Int(effectiveDate.timeIntervalSince1970 / 60))
+    }
+
+    /// Résout les directions monde des étoiles visibles pour l'instant courant.
+    private func recomputeStars() {
+        let coordinate = context.scene.coordinate
+        let sidereal = StarCatalog.localSiderealTime(
+            date: effectiveDate, longitudeEast: coordinate.longitude)
+        starField = StarCatalog.visibleStars(
+            Self.starCatalog, latitude: coordinate.latitude, siderealTime: sidereal)
+        starRevision += 1
     }
 
     /// Bascule le mode rotation du regard (jumeau du bouton pinceau).
@@ -245,6 +281,8 @@ struct CanvasView: View {
             nightWeight: light.nightWeight,
             skyZenithRadiance: light.skyZenithRadiance,
             skyHorizonRadiance: light.skyHorizonRadiance,
+            stars: starField,
+            starRevision: starRevision,
             cameraTanHalfFov: tanHalfFieldOfView,
             cameraRight: basis.right,
             cameraUp: basis.up,

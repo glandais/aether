@@ -27,6 +27,10 @@ struct MetalView: UIViewRepresentable {
     /// Radiance ciel zénith/horizon (intégrales CPU) pour le reflet de la mer.
     var skyZenithRadiance: SIMD3<Float>
     var skyHorizonRadiance: SIMD3<Float>
+    /// Étoiles visibles (directions monde) + révision : le Renderer ne
+    /// reconstruit le buffer que lorsque la révision change.
+    var stars: [VisibleStar]
+    var starRevision: Int
     var cameraTanHalfFov: Float
     /// Base caméra → monde (lacet + tangage du regard) pour le rayon de vue du ciel.
     var cameraRight: SIMD3<Float>
@@ -67,6 +71,7 @@ struct MetalView: UIViewRepresentable {
         renderer.updateSea(sea)
         renderer.updateMoon(direction: moonSkyDirection, glint: moonGlint, nightWeight: nightWeight)
         renderer.updateSeaSky(zenith: skyZenithRadiance, horizon: skyHorizonRadiance)
+        renderer.updateStars(stars, revision: starRevision)
         renderer.updateFieldOfView(cameraTanHalfFov)
         renderer.updateCameraBasis(right: cameraRight, up: cameraUp, forward: cameraForward)
         renderer.updateStrokes(strokes)

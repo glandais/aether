@@ -59,6 +59,22 @@ private struct SkyUniforms {
     var moonDiscColor: SIMD4<Float>  // xyz: blanc froid lunaire, atténué par l'altitude
 }
 
+/// Une étoile prête pour le GPU. Disposition **identique** à `GPUStar` dans
+/// `Stars.metal` (deux float4).
+private struct GPUStar {
+    var dirMag: SIMD4<Float>  // xyz: direction monde ; w: magnitude visuelle
+    var extra: SIMD4<Float>   // x: indice B-V ; yzw: inutilisés
+}
+
+/// Uniforms par frame du shader d'étoiles. Disposition **identique** à
+/// `StarUniforms` dans `Stars.metal`.
+private struct StarUniforms {
+    var camRight: SIMD4<Float>
+    var camUp: SIMD4<Float>
+    var camForward: SIMD4<Float>
+    var params: SIMD4<Float>  // x: tan(FOV/2) ; y: aspect ; z: poids nocturne ; w: temps (s)
+}
+
 /// Rendu de l'étape 4 : le paysage en texture de fond, surmonté d'un nuage dont
 /// la forme provient d'un volume de densité 3D peint au pinceau. La sphère
 /// analytique des étapes 2-3 est remplacée par ce volume ; le bruit
@@ -69,6 +85,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let skyPipeline: MTLRenderPipelineState
     private let cloudPipeline: MTLRenderPipelineState
     private let compositePipeline: MTLRenderPipelineState
+    private let starPipeline: MTLRenderPipelineState
     private let stampPipeline: MTLComputePipelineState
     private let clearPipeline: MTLComputePipelineState
     // Paysage : placeholder au départ, remplacé par la Feature (galerie curée)
@@ -135,6 +152,15 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var moonGlint = SIMD3<Float>(0, 0, 0)
     private var nightWeight: Float = 0
 
+    // Étoiles (BSC5) dessinées dans le ciel — purs points additifs, sans
+    // éclairage. Les directions monde sont résolues par la Feature pour le
+    // lieu/heure (cf. `StarCatalog`) et téléversées dans `starBuffer` ; on ne
+    // reconstruit le buffer que lorsque `starRevision` change (la rotation/zoom
+    // ne change que la base caméra, appliquée côté GPU).
+    private var starBuffer: MTLBuffer?
+    private var starCount = 0
+    private var appliedStarRevision = -1
+
     // Radiance du ciel (zénith / horizon) pour le reflet bon marché de la mer.
     private var skyZenithRadiance = SIMD3<Float>(0, 0, 0)
     private var skyHorizonRadiance = SIMD3<Float>(0, 0, 0)
@@ -183,6 +209,8 @@ final class Renderer: NSObject, MTKViewDelegate {
               let cloudFragment = library.makeFunction(name: "cloud_fragment"),
               let compositeVertex = library.makeFunction(name: "composite_vertex"),
               let compositeFragment = library.makeFunction(name: "composite_fragment"),
+              let starVertex = library.makeFunction(name: "star_vertex"),
+              let starFragment = library.makeFunction(name: "star_fragment"),
               let stampFunction = library.makeFunction(name: "stamp_density_volume"),
               let clearFunction = library.makeFunction(name: "clear_density_volume") else {
             return nil
@@ -206,6 +234,10 @@ final class Renderer: NSObject, MTKViewDelegate {
             compositePipeline = try Renderer.makePipeline(
                 device: device, vertex: compositeVertex, fragment: compositeFragment,
                 pixelFormat: format, blend: .premultiplied)
+            // Étoiles : points additifs composés sur le ciel, sous le nuage.
+            starPipeline = try Renderer.makePipeline(
+                device: device, vertex: starVertex, fragment: starFragment,
+                pixelFormat: format, blend: .additive)
             stampPipeline = try device.makeComputePipelineState(function: stampFunction)
             clearPipeline = try device.makeComputePipelineState(function: clearFunction)
         } catch {
@@ -302,6 +334,27 @@ final class Renderer: NSObject, MTKViewDelegate {
         self.moonSkyDirection = direction
         self.moonGlint = glint
         self.nightWeight = nightWeight
+    }
+
+    /// Reçoit les étoiles visibles (directions monde résolues par la Feature) et
+    /// reconstruit le buffer GPU **seulement** si la révision a changé — la
+    /// rotation/zoom du regard ne change que la base caméra, pas les directions.
+    func updateStars(_ stars: [VisibleStar], revision: Int) {
+        guard revision != appliedStarRevision else { return }
+        appliedStarRevision = revision
+        starCount = stars.count
+        guard !stars.isEmpty else {
+            starBuffer = nil
+            return
+        }
+        let gpuStars = stars.map { star in
+            GPUStar(
+                dirMag: SIMD4(star.direction.x, star.direction.y, star.direction.z, star.magnitude),
+                extra: SIMD4(star.colorIndex, 0, 0, 0))
+        }
+        starBuffer = gpuStars.withUnsafeBytes { raw in
+            device.makeBuffer(bytes: raw.baseAddress!, length: raw.count, options: .storageModeShared)
+        }
     }
 
     /// Reçoit la radiance du ciel (zénith / horizon) pour le reflet de la mer.
@@ -464,6 +517,25 @@ final class Renderer: NSObject, MTKViewDelegate {
         compositeEncoder.setFragmentTexture(skyTarget, index: 0)
         compositeEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
 
+        // Étoiles : points additifs sur le ciel, **avant** le nuage (qui les
+        // occulte). Mêmes base caméra / FOV / aspect que le ciel → coïncidence
+        // au pixel près. Night-gated par `nightWeight`.
+        if starCount > 0, let starBuffer = starBuffer {
+            var starUniforms = StarUniforms(
+                camRight: SIMD4(cameraRight.x, cameraRight.y, cameraRight.z, 0.0),
+                camUp: SIMD4(cameraUp.x, cameraUp.y, cameraUp.z, 0.0),
+                camForward: SIMD4(cameraForward.x, cameraForward.y, cameraForward.z, 0.0),
+                params: SIMD4(cameraTanHalfFov, aspect, nightWeight, elapsed))
+            compositeEncoder.setRenderPipelineState(starPipeline)
+            compositeEncoder.setVertexBuffer(starBuffer, offset: 0, index: 0)
+            compositeEncoder.setVertexBytes(
+                &starUniforms, length: MemoryLayout<StarUniforms>.stride, index: 1)
+            compositeEncoder.drawPrimitives(type: .point, vertexStart: 0, vertexCount: starCount)
+        }
+
+        // Nuage upsamplé « over » le ciel + les étoiles : restaurer le pipeline
+        // composite et la texture nuage après le draw des points.
+        compositeEncoder.setRenderPipelineState(compositePipeline)
         compositeEncoder.setFragmentTexture(writeTarget, index: 0)
         compositeEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         compositeEncoder.endEncoding()
@@ -576,6 +648,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     private enum Blend {
         case none
         case premultiplied
+        case additive
     }
 
     private static func makePipeline(
@@ -591,7 +664,10 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         let attachment = descriptor.colorAttachments[0]
         attachment?.pixelFormat = pixelFormat
-        if case .premultiplied = blend {
+        switch blend {
+        case .none:
+            break
+        case .premultiplied:
             // Compositing « over » avec couleur prémultipliée par l'alpha.
             attachment?.isBlendingEnabled = true
             attachment?.rgbBlendOperation = .add
@@ -600,6 +676,16 @@ final class Renderer: NSObject, MTKViewDelegate {
             attachment?.sourceAlphaBlendFactor = .one
             attachment?.destinationRGBBlendFactor = .oneMinusSourceAlpha
             attachment?.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        case .additive:
+            // Émission additive (étoiles) : ajoute la couleur, préserve l'alpha
+            // du ciel (déjà opaque) pour ne pas perturber la composition « over ».
+            attachment?.isBlendingEnabled = true
+            attachment?.rgbBlendOperation = .add
+            attachment?.alphaBlendOperation = .add
+            attachment?.sourceRGBBlendFactor = .one
+            attachment?.destinationRGBBlendFactor = .one
+            attachment?.sourceAlphaBlendFactor = .zero
+            attachment?.destinationAlphaBlendFactor = .one
         }
         return try device.makeRenderPipelineState(descriptor: descriptor)
     }
