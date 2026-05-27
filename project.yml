@@ -15,7 +15,7 @@ settings:
     # Signature automatique avec l'équipe « GABRIEL JEAN YVES ANNE LANDAIS ».
     DEVELOPMENT_TEAM: "7Q49262697"
     CODE_SIGN_STYLE: Automatic
-    MARKETING_VERSION: "0.1.0"
+    MARKETING_VERSION: "1.0.0"
     CURRENT_PROJECT_VERSION: "1"
     DEVELOPMENT_LANGUAGE: fr
     ENABLE_USER_SCRIPT_SANDBOXING: YES
@@ -44,6 +44,11 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: Aether
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait"
+        # App portrait-only en plein écran → exempte de l'exigence d'orientations iPad
+        # (ITMS-90474) tout en conservant la cible universelle.
+        INFOPLIST_KEY_UIRequiresFullScreen: YES
+        # Pas de chiffrement non exempté → évite la question de conformité export à chaque build.
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
         # Description d'usage — registre sobre.
         INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: "Aether utilise votre position pour orienter le ciel : soleil, lune et lumière du lieu choisi."
 
