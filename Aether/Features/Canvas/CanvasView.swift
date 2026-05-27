@@ -37,6 +37,12 @@ struct CanvasView: View {
     /// Désaturation de l'ambiance bleue du ciel (0 = gris, 1 = bleu ciel pur),
     /// pour éviter que le corps du nuage ne vire au gris-bleu.
     private static let ambientSaturation: Float = 0.5
+    /// Luminosités des disques solaire/lunaire dessinés dans le ciel (réglées par
+    /// capture). Le soleil sature vers le blanc ; la lune reste tamisée.
+    private static let sunDiscBrightness: Float = 1.3
+    private static let moonDiscBrightness: Float = 0.9
+    /// Blanc froid du disque lunaire (la phase/teinte vient de la géométrie).
+    private static let moonDiscTint = SIMD3<Float>(0.85, 0.88, 1.0)
 
     /// Éclairage résolu pour l'instant courant : direction, couleur, ambiance.
     private struct ResolvedLight {
@@ -44,6 +50,10 @@ struct CanvasView: View {
         /// Direction monde du soleil (pour le ciel ; le ciel reste sombre la nuit
         /// quand le soleil est sous l'horizon, là où `direction` suit la lune).
         var skySunDirection: SIMD3<Float>
+        /// Couleurs des disques solaire/lunaire dessinés dans le ciel (la position
+        /// de la lune réutilise `moonSkyDirection`).
+        var sunDiscColor: SIMD3<Float>
+        var moonDiscColor: SIMD3<Float>
         var color: SIMD3<Float>
         var ambient: SIMD3<Float>
         /// Éclairement du sol (0 nuit → 1 jour) : assombrit le paysage la nuit.
@@ -176,8 +186,19 @@ struct CanvasView: View {
         let moonLuma = 0.2126 * moonLight.color.x + 0.7152 * moonLight.color.y + 0.0722 * moonLight.color.z
         let groundLight = max(sunWeight, min(moonLuma * 0.06, 0.15), 0.02)
 
+        // Couleurs des disques. Le soleil réutilise la transmittance solaire
+        // (chaude bas, blanche haut, nulle sous l'horizon → disque qui s'éteint
+        // seul). La lune est un blanc froid atténué par son altitude ; la phase
+        // (croissant/gibbeuse) est calculée côté shader, donc pas de produit par
+        // la fraction éclairée ici.
+        let sunDiscColor = atmosphere.sunTransmittance(sunDirection: sunWorld)
+            * exposure * Self.sunDiscBrightness
+        let moonAltitudeFade = SkyLighting.smoothstep(-0.02, 0.05, Float(moon.altitude))
+        let moonDiscColor = Self.moonDiscTint * (moonAltitudeFade * Self.moonDiscBrightness)
+
         return ResolvedLight(
             direction: direction, skySunDirection: sun.worldDirection,
+            sunDiscColor: sunDiscColor, moonDiscColor: moonDiscColor,
             color: color, ambient: ambient, groundLight: groundLight, isDaytime: sunWeight >= 0.5,
             moonSkyDirection: moon.worldDirection,
             moonGlint: moonLight.color * exposure,
@@ -211,6 +232,8 @@ struct CanvasView: View {
             strokes: model.strokes,
             sunDirection: light.direction,
             skySunDirection: light.skySunDirection,
+            sunDiscColor: light.sunDiscColor,
+            moonDiscColor: light.moonDiscColor,
             atmosphere: atmosphere,
             groundLight: light.groundLight,
             sunColor: light.color,

@@ -39,6 +39,9 @@ struct SkyUniforms {
     float4 moonGlint;          // xyz: moonlight colour (intensity included)
     float4 skyZenith;          // xyz: sky radiance at the zenith (CPU integral, linear HDR)
     float4 skyHorizon;         // xyz: sky radiance near the horizon (CPU integral, linear HDR)
+    float4 discParams;         // x: sun angular radius; y: moon angular radius; z/w: unused
+    float4 sunDiscColor;       // xyz: display-referred sun colour (0 below horizon); w: unused
+    float4 moonDiscColor;      // xyz: cool-white moon colour, altitude-faded; w: unused
 };
 
 // Fullscreen triangle generated from the vertex id — no vertex buffer needed.
@@ -318,6 +321,81 @@ static float3 seaShade(float3 p, float3 n, float3 eye, float3 sunDir,
     return color;
 }
 
+// --- Sun & moon discs -------------------------------------------------------
+
+// Bilinear value noise on a hash lattice. Used only for faint lunar surface
+// mottling, so quality is uncritical; cheap and tile-free is enough.
+static float hash21(float2 p) {
+    p = fract(p * float2(123.34, 345.45));
+    p += dot(p, p + 34.345);
+    return fract(p.x * p.y);
+}
+
+static float valueNoise(float2 p) {
+    const float2 i = floor(p);
+    const float2 f = fract(p);
+    const float2 u = f * f * (3.0 - 2.0 * f);
+    const float a = hash21(i);
+    const float b = hash21(i + float2(1.0, 0.0));
+    const float c = hash21(i + float2(0.0, 1.0));
+    const float d = hash21(i + float2(1.0, 1.0));
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// Sun: a bright core with a soft bloom halo. `sunDiscColor` is supplied by the
+// CPU as the atmospheric transmittance toward the sun, hence warm/reddened when
+// low and exactly zero below the horizon — so the disc fades out on its own.
+static float3 sunDisc(float3 rayDir, float3 sunDir, constant SkyUniforms &sky) {
+    const float radius = sky.discParams.x;
+    const float cosToSun = dot(rayDir, sunDir);
+    const float cosR = cos(radius);
+    const float limb = radius * 0.35;          // soft edge ~1/3 of the radius
+    const float core = smoothstep(cosR - limb * (1.0 - cosR), cosR, cosToSun);
+    const float glow = pow(max(cosToSun, 0.0), 2200.0) * 0.5;  // gentle bloom
+    return sky.sunDiscColor.xyz * (core + glow);
+}
+
+// Moon: a phased disc whose lit/dark split and crescent orientation come purely
+// from the apparent sun and moon directions (mirrors `MoonPhase` on the CPU).
+// Adds faint earthshine on the dark side and subtle surface mottling.
+static float3 moonDisc(float3 rayDir, float3 sunDir, float3 moonDir,
+                       constant SkyUniforms &sky) {
+    const float radius = sky.discParams.y;
+    const float cosD = dot(rayDir, moonDir);
+    if (cosD < cos(radius * 1.6)) {            // outside the disc (+ margin)
+        return float3(0.0);
+    }
+
+    // Bright-limb direction: sun projected into the moon's disc plane.
+    const float3 proj = sunDir - dot(sunDir, moonDir) * moonDir;
+    const float projLen = length(proj);
+    const float3 brightDir = (projLen > 1e-4)
+        ? proj / projLen
+        : normalize(cross(moonDir, float3(0.0, 1.0, 0.0)));
+    const float3 tangent = cross(moonDir, brightDir);
+
+    // Map the ray's angular offset from the moon centre into disc coords.
+    const float3 off = rayDir - cosD * moonDir;
+    const float ang = acos(clamp(cosD, -1.0, 1.0));
+    const float r = ang / radius;              // 0 centre → 1 limb (perfectly round)
+    const float2 raw = float2(dot(off, brightDir), dot(off, tangent));
+    const float2 dir2 = (length(raw) > 1e-6) ? normalize(raw) : float2(0.0);
+    const float a = r * dir2.x;
+    const float b = r * dir2.y;
+
+    // Visible-hemisphere surface normal (`-moonDir` faces the viewer).
+    const float h = sqrt(max(0.0, 1.0 - a * a - b * b));
+    const float3 normal = a * brightDir + b * tangent - h * moonDir;
+
+    const float lit = smoothstep(-0.05, 0.05, dot(normal, sunDir));
+    const float mott = 1.0 + (valueNoise(float2(a, b) * 6.0) - 0.5) * 0.12;
+    const float earthshine = 0.02 * (1.0 - lit) *
+        smoothstep(0.0, 0.5, dot(sunDir, -moonDir) * 0.5 + 0.5);
+    const float edge = 1.0 - smoothstep(1.0 - fwidth(r) - radius * 0.3, 1.0, r);
+
+    return sky.moonDiscColor.xyz * (lit * mott + earthshine) * edge;
+}
+
 fragment float4 sky_background_fragment(BackgroundInOut in [[stage_in]],
                                         constant SkyUniforms &sky [[buffer(0)]],
                                         texture2d<float> landscape [[texture(0)]],
@@ -350,6 +428,14 @@ fragment float4 sky_background_fragment(BackgroundInOut in [[stage_in]],
         const float3 radiance = computeSkyRadiance(origin, rayDir, sunDir, sky);
         skyColor = 1.0 - exp(-radiance * exposure);
     }
+
+    // Sun & moon discs, added as display-referred colours on top of the tonemapped
+    // sky (a low-radiance moon would be crushed if injected before the exposure
+    // curve). The ground/sea mix below clips any disc that crosses the horizon, and
+    // the later cloud composite pass occludes them where clouds are painted.
+    const float3 discMoonDir = normalize(sky.moonDirection.xyz);
+    skyColor += sunDisc(rayDir, sunDir, sky);
+    skyColor += moonDisc(rayDir, sunDir, discMoonDir, sky);
 
     // Below the horizon: either a raymarched sea (when the curated landscape
     // enables one) or a single meaningful ground tone. Both are anchored to the

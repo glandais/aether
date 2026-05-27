@@ -10,6 +10,10 @@ struct MetalView: UIViewRepresentable {
     var strokes: [BrushStroke]
     var sunDirection: SIMD3<Float>
     var skySunDirection: SIMD3<Float>
+    /// Couleurs des disques solaire/lunaire dessinés dans le ciel (la position de
+    /// la lune réutilise `moonSkyDirection`).
+    var sunDiscColor: SIMD3<Float>
+    var moonDiscColor: SIMD3<Float>
     var atmosphere: Atmosphere
     var groundLight: Float
     var sunColor: SIMD3<Float>
@@ -57,6 +61,7 @@ struct MetalView: UIViewRepresentable {
 
         renderer.updateSunDirection(sunDirection)
         renderer.updateSky(sunDirection: skySunDirection, atmosphere: atmosphere, groundLight: groundLight)
+        renderer.updateDiscs(sunColor: sunDiscColor, moonColor: moonDiscColor)
         renderer.updateLighting(sunColor: sunColor, ambient: skyAmbient)
         renderer.updateCloudParameters(cloudParameters)
         renderer.updateSea(sea)

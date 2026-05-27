@@ -480,6 +480,42 @@ Shadertoy `Ms2SD1`, portée en MSL — attribution conservée en en-tête de
 - **FPS** : `Renderer.draw` journalise les images/s (~1 s, os.log, subsystem
   `io.github.glandais.aether`, catégorie `Renderer`) — `log stream --level info`.
 
+## Soleil & lune dessinés dans le ciel — **terminé**
+
+Le ciel dessine désormais les deux astres, dans la passe de fond
+(`Background.metal`, avant la composition du nuage → occlus par les nuages,
+et suivant le regard/zoom *gratuitement* puisque le rayon de vue est en monde).
+
+- **Soleil** : cœur brillant + halo de *bloom* doux (`sunDisc`). La couleur vient
+  de la **transmittance atmosphérique** déjà calculée pour le nuage
+  (`Atmosphere.sunTransmittance`) → chaude/rougie quand le soleil est bas, nulle
+  sous l'horizon (le disque s'éteint seul ; le *ground mix* clippe tout débord).
+- **Lune** : disque **phasé** (croissant/gibbeuse) dont le côté éclairé et
+  l'orientation découlent des **seules** directions apparentes du Soleil et de la
+  Lune (aucune donnée astro supplémentaire) ; terminateur doux, *earthshine*
+  ténue sur la face sombre, léger *mottling* de surface (`moonDisc`).
+- **Taille constante avec l'heure** (décidé) : le diamètre apparent réel varie à
+  peine sur une journée, le « gros soleil à l'horizon » est une illusion
+  perceptive non reproductible, et l'aplatissement par réfraction a été écarté.
+  Disques légèrement agrandis (~2× le vrai 0.5°) pour une présence lisible —
+  rayons/luminosités sont des constantes réglables (`Renderer.sunAngularRadius`/
+  `moonAngularRadius`, `CanvasView.sunDiscBrightness`/`moonDiscBrightness`).
+- **`Domain/MoonPhase.swift`** (pur, testé) : `brightLimbDirection` (projection du
+  Soleil dans le plan du disque, repli orthogonal fini si colinéaire → pas de NaN)
+  et `surfaceLit` (normale de l'hémisphère visible → `dot(n, soleil)`). Le shader
+  `moonDisc` **reproduit** cette formule (couple CPU/GPU comme `Atmosphere`).
+- **Plomberie** : `SkyUniforms` (apparié à la main Swift ↔ `.metal`) gagne 3 champs
+  `float4` *appendus* en fin de struct (rayons des disques, couleurs soleil/lune) ;
+  la position de la lune **réutilise** le champ `moonDirection` déjà introduit par
+  la mer. `Renderer.updateDiscs(sunColor:moonColor:)` ; `MetalView`/`CanvasView`
+  transmettent les deux couleurs (le Rendering ne dépend toujours que du Domain).
+  Les disques sont composés dans `skyColor` (display-referred, après tonemap) avant
+  le mix sol/mer, donc occlus par la mer/le sol sous l'horizon comme par les nuages.
+- Tests : `MoonPhaseTests` (nouvelle/pleine/quartier, limbe vers le Soleil, cas
+  dégénéré sans NaN). Vérifié au simulateur : midi → disque solaire blanc + halo ;
+  coucher → soleil bas rougi ; nuit → lune gibbeuse (~75 %) avec terminateur,
+  *mottling* et *earthshine*.
+
 ## Reste à faire
 
 - **Réglages** (`Features/Settings`) : choisir le **lieu** (l'heure est déjà

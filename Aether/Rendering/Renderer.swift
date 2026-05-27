@@ -53,6 +53,10 @@ private struct SkyUniforms {
     var moonGlint: SIMD4<Float>     // xyz: couleur du clair de lune (intensité comprise)
     var skyZenith: SIMD4<Float>     // xyz: radiance ciel au zénith (intégrale CPU, linéaire)
     var skyHorizon: SIMD4<Float>    // xyz: radiance ciel à l'horizon (intégrale CPU, linéaire)
+    // Disques soleil/lune dessinés dans le ciel (la lune réutilise `moonDirection`).
+    var discParams: SIMD4<Float>     // x: rayon angulaire soleil ; y: lune ; z/w: inutilisés
+    var sunDiscColor: SIMD4<Float>   // xyz: couleur du disque solaire (nulle sous l'horizon)
+    var moonDiscColor: SIMD4<Float>  // xyz: blanc froid lunaire, atténué par l'altitude
 }
 
 /// Rendu de l'étape 4 : le paysage en texture de fond, surmonté d'un nuage dont
@@ -105,6 +109,17 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var skyGroundLight: Float = 1
     // Exposition du tonemap ciel (à régler par capture).
     private static let skyExposure: Float = 1.0
+
+    // Disques soleil/lune dessinés dans le ciel. Le soleil réutilise
+    // `skySunDirection`, la lune `moonSkyDirection` ; les couleurs sont résolues
+    // par la Feature (soleil = transmittance atmosphérique, nulle sous l'horizon ;
+    // lune = blanc froid atténué par son altitude). Repli avant mise à jour.
+    private var sunDiscColor = SIMD3<Float>.zero
+    private var moonDiscColor = SIMD3<Float>.zero
+    // Rayons angulaires (radians). Le vrai diamètre est ~0.0045 rad (0.5°) ;
+    // légèrement agrandis (~2×) pour une présence lisible. Constants avec l'heure.
+    private static let sunAngularRadius: Float = 0.009
+    private static let moonAngularRadius: Float = 0.009
 
     // Paramètres météo (étape 9), résolus par la Feature depuis la météo
     // statique du paysage curé. Neutres avant la première mise à jour.
@@ -269,6 +284,13 @@ final class Renderer: NSObject, MTKViewDelegate {
         self.skyGroundLight = groundLight
     }
 
+    /// Reçoit les couleurs des disques solaire/lunaire (résolues par la Feature ;
+    /// la position du soleil/lune réutilise `skySunDirection`/`moonSkyDirection`).
+    func updateDiscs(sunColor: SIMD3<Float>, moonColor: SIMD3<Float>) {
+        self.sunDiscColor = sunColor
+        self.moonDiscColor = moonColor
+    }
+
     /// Reçoit la surface de mer du paysage curé (rendue sous l'horizon).
     func updateSea(_ sea: SeaSurface) {
         self.sea = sea
@@ -414,7 +436,10 @@ final class Renderer: NSObject, MTKViewDelegate {
             moonDirection: SIMD4(moonSkyDirection.x, moonSkyDirection.y, moonSkyDirection.z, nightWeight),
             moonGlint: SIMD4(moonGlint.x, moonGlint.y, moonGlint.z, 0.0),
             skyZenith: SIMD4(skyZenithRadiance.x, skyZenithRadiance.y, skyZenithRadiance.z, 0.0),
-            skyHorizon: SIMD4(skyHorizonRadiance.x, skyHorizonRadiance.y, skyHorizonRadiance.z, 0.0))
+            skyHorizon: SIMD4(skyHorizonRadiance.x, skyHorizonRadiance.y, skyHorizonRadiance.z, 0.0),
+            discParams: SIMD4(Renderer.sunAngularRadius, Renderer.moonAngularRadius, 0.0, 0.0),
+            sunDiscColor: SIMD4(sunDiscColor.x, sunDiscColor.y, sunDiscColor.z, 0.0),
+            moonDiscColor: SIMD4(moonDiscColor.x, moonDiscColor.y, moonDiscColor.z, 0.0))
 
         let skyPass = MTLRenderPassDescriptor()
         skyPass.colorAttachments[0].texture = skyTarget
