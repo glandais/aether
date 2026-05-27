@@ -32,6 +32,16 @@ private struct CloudTemporal {
     var activeIndex: UInt32
 }
 
+/// Uniforms du shader de ciel atmosphérique. Disposition mémoire **identique**
+/// à `SkyUniforms` dans `Background.metal`.
+private struct SkyUniforms {
+    var sunDirection: SIMD4<Float>        // xyz: direction monde vers le soleil
+    var rayleighScattering: SIMD4<Float>  // xyz: Rayleigh ; w: Mie
+    var scaleHeights: SIMD4<Float>        // x: H Rayleigh ; y: H Mie ; z: g ; w: intensité soleil
+    var radii: SIMD4<Float>               // x: rayon planète ; y: atmosphère ; z: œil ; w: exposition
+    var camera: SIMD4<Float>              // x: tan(FOV/2) ; y: aspect
+}
+
 /// Rendu de l'étape 4 : le paysage en texture de fond, surmonté d'un nuage dont
 /// la forme provient d'un volume de densité 3D peint au pinceau. La sphère
 /// analytique des étapes 2-3 est remplacée par ce volume ; le bruit
@@ -40,6 +50,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let device: MTLDevice
     private let commandQueue: MTLCommandQueue
     private let backgroundPipeline: MTLRenderPipelineState
+    private let skyPipeline: MTLRenderPipelineState
     private let cloudPipeline: MTLRenderPipelineState
     private let compositePipeline: MTLRenderPipelineState
     private let stampPipeline: MTLComputePipelineState
@@ -68,6 +79,13 @@ final class Renderer: NSObject, MTKViewDelegate {
     // Direction du soleil (vers l'astre), résolue par la Feature depuis
     // l'`AstroService` (étape 8). Valeur de repli avant la première mise à jour.
     private var sunDirection = SIMD3<Float>(0.40, 0.12, -0.50)
+
+    // Ciel atmosphérique : direction monde du soleil (distincte de la lumière du
+    // nuage, qui passe à la lune la nuit) + paramètres de diffusion.
+    private var skySunDirection = SIMD3<Float>(0.40, 0.12, -0.50)
+    private var atmosphere = Atmosphere.earth
+    // Exposition du tonemap ciel (à régler par capture).
+    private static let skyExposure: Float = 1.0
 
     // Paramètres météo (étape 9), résolus par la Feature depuis la météo
     // statique du paysage curé. Neutres avant la première mise à jour.
@@ -107,6 +125,7 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         guard let backgroundVertex = library.makeFunction(name: "background_vertex"),
               let backgroundFragment = library.makeFunction(name: "background_fragment"),
+              let skyFragment = library.makeFunction(name: "sky_background_fragment"),
               let cloudVertex = library.makeFunction(name: "cloud_vertex"),
               let cloudFragment = library.makeFunction(name: "cloud_fragment"),
               let compositeVertex = library.makeFunction(name: "composite_vertex"),
@@ -120,6 +139,11 @@ final class Renderer: NSObject, MTKViewDelegate {
         do {
             backgroundPipeline = try Renderer.makePipeline(
                 device: device, vertex: backgroundVertex, fragment: backgroundFragment,
+                pixelFormat: format, blend: .none)
+            // Ciel atmosphérique dynamique (suit le soleil). Réutilise le
+            // vertex plein écran du fond ; échantillonne le paysage sous l'horizon.
+            skyPipeline = try Renderer.makePipeline(
+                device: device, vertex: backgroundVertex, fragment: skyFragment,
                 pixelFormat: format, blend: .none)
             // Le nuage est rendu hors écran (demi-rés, HDR), sans blending :
             // la composition « over » a lieu au passage composite.
@@ -195,6 +219,12 @@ final class Renderer: NSObject, MTKViewDelegate {
     func updateLighting(sunColor: SIMD3<Float>, ambient: SIMD3<Float>) {
         self.sunColor = sunColor
         self.skyAmbient = ambient
+    }
+
+    /// Reçoit la direction monde du soleil et l'atmosphère pour le ciel dynamique.
+    func updateSky(sunDirection: SIMD3<Float>, atmosphere: Atmosphere) {
+        self.skySunDirection = sunDirection
+        self.atmosphere = atmosphere
     }
 
     /// Remplace le paysage de fond par l'image fournie (galerie ou photo).
@@ -328,7 +358,21 @@ final class Renderer: NSObject, MTKViewDelegate {
         guard let compositeEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
             return
         }
-        compositeEncoder.setRenderPipelineState(backgroundPipeline)
+        // Fond : ciel atmosphérique dynamique (suit le soleil), paysage sous l'horizon.
+        var skyUniforms = SkyUniforms(
+            sunDirection: SIMD4(skySunDirection.x, skySunDirection.y, skySunDirection.z, 0.0),
+            rayleighScattering: SIMD4(
+                atmosphere.rayleighScattering.x, atmosphere.rayleighScattering.y,
+                atmosphere.rayleighScattering.z, atmosphere.mieScattering),
+            scaleHeights: SIMD4(
+                atmosphere.rayleighScaleHeight, atmosphere.mieScaleHeight,
+                atmosphere.mieAnisotropy, atmosphere.sunIntensity),
+            radii: SIMD4(
+                atmosphere.planetRadius, atmosphere.atmosphereRadius,
+                atmosphere.eyeHeight, Renderer.skyExposure),
+            camera: SIMD4(cameraTanHalfFov, aspect, 0.0, 0.0))
+        compositeEncoder.setRenderPipelineState(skyPipeline)
+        compositeEncoder.setFragmentBytes(&skyUniforms, length: MemoryLayout<SkyUniforms>.stride, index: 0)
         compositeEncoder.setFragmentTexture(landscapeTexture, index: 0)
         compositeEncoder.setFragmentSamplerState(sampler, index: 0)
         compositeEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)

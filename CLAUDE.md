@@ -345,10 +345,56 @@ dépendance réseau.
   désactivées selon `canUndo`/`canRedo`), affichée dès qu'il y a un historique.
 - Tests : `CanvasModelTests` (annuler/rétablir, purge de la pile, effacement).
 
+## Fond de ciel dynamique (atmosphère) — **câblé**
+
+Modèle de diffusion atmosphérique inspiré de CesiumJS (`AtmosphereCommon.glsl`,
+`computeScattering`) et Hillaire 2020, pour que le **ciel suive le soleil** au
+lieu d'un dégradé figé. La galerie ne contenant plus que des paysages curés
+procéduraux (l'import photo est retiré), le ciel est remplacé pour **toutes**
+les scènes — plus de sky baké à segmenter.
+
+Câblé dans le `Renderer` (passe composite) : `skyPipeline`
+(`sky_background_fragment`) remplace `background_pipeline`, alimenté par
+`SkyUniforms` (struct Swift à la disposition identique au `.metal`) =
+`Atmosphere.earth` + **direction monde du soleil** (distincte de la lumière du
+nuage, qui suit la lune la nuit) + `tanHalfFov`/aspect. `CanvasView` passe
+`light.skySunDirection` (= `sun.worldDirection`) et `.earth` via `MetalView`.
+Vérifié au simulateur : midi → ciel bleu, coucher → rougeoiement bas-horizon.
+
+- **`Domain/Atmosphere.swift`** : type pur (Rayleigh/Mie : coefficients, hauteurs
+  d'échelle, anisotropie `g`, rayons planète/atmosphère, hauteur d'œil,
+  intensité). Défaut `Atmosphere.earth` (valeurs terrestres Bruneton/Hillaire).
+  Voyage Feature → `Renderer` en uniformes, comme `Lighting`/`CloudParameters`.
+- **`Rendering/Shaders/Background.metal`** : `sky_background_fragment` reconstruit
+  un rayon de vue monde par pixel (même convention que `Cloud.metal` : -Z = Nord,
+  +X = Est, +Y = haut, FOV via `tanHalfFov` + aspect), puis intègre la diffusion
+  simple Rayleigh + Mie (marche primaire + light-march vers le soleil) →
+  rougeoiement bas-soleil et halo de Mie *gratuits*, pilotés par la même
+  `sunDirection` que le nuage. Sous l'horizon : dégradé paysage conservé
+  (cross-fade sur `rayDir.y`). `background_fragment` (placeholder) reste l'entrée
+  câblée comme repli ; `sky_background_fragment` est l'entrée active.
+
+**Choix d'implémentation** : marche temps réel par pixel (pas de LUT). Caméra
+fixe + soleil lent → le fond est cacheable et négligeable devant le raymarch
+nuage (demi-rés + temporel). Passer à des LUT Hillaire-2020 seulement si le
+profilage device l'exige ; toute LUT échantillonnée `filter::linear` doit être
+`RGBA16Float` (pas `R32Float`, cf. pièges connus).
+
+**Encore ouvert** :
+- *Réglage* : exposition (`Renderer.skyExposure`), nombre de pas, et défauts
+  `earth` sont des points de départ ; l'horizon de midi tire un peu vert/jaune,
+  le crépuscule s'assombrit vite (diffusion simple, pas de multi-scattering ni
+  d'afterglow). À affiner par capture.
+- *Cohérence (intérêt réel, non fait)* : dériver `SkyLighting.ambient` / teinte
+  soleil du **même** intégrale et multiplier le soleil reçu par le nuage par la
+  transmittance-au-soleil → une seule atmosphère pilote fond, ambiance et
+  éclairage du nuage, au lieu de la courbe `SkyLighting` accordée à la main.
+  Les stops `skyLow`/`skyHigh` des palettes deviendraient calculés.
+
 ## Reste à faire
 
 - **Réglages** (`Features/Settings`) : choisir le **lieu** (l'heure est déjà
   réglable au canvas ; manque la sélection géographique manuelle).
-- **Fond de ciel dynamique** : le paysage est une image figée — il ne suit pas
-  l'heure scrutée (seul le nuage se rallume). Ciel procédural = gros chantier.
+- **Ciel ↔ nuage cohérents** : brancher l'éclairage du nuage sur l'intégrale
+  atmosphère (voir section ci-dessus), + réglage des constantes du ciel.
 - **Profilage perf sur device réel** (étape 7 vérifiée structurellement seulement).

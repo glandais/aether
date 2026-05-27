@@ -20,6 +20,9 @@ struct CanvasView: View {
     /// Éclairage résolu pour l'instant courant : direction, couleur, ambiance.
     private struct ResolvedLight {
         var direction: SIMD3<Float>
+        /// Direction monde du soleil (pour le ciel ; le ciel reste sombre la nuit
+        /// quand le soleil est sous l'horizon, là où `direction` suit la lune).
+        var skySunDirection: SIMD3<Float>
         var color: SIMD3<Float>
         var ambient: SIMD3<Float>
         var isDaytime: Bool
@@ -92,7 +95,9 @@ struct CanvasView: View {
         let exposure = context.skyExposure
         let color = (sky.sunColor * sunWeight + moonLight.color * (1 - sunWeight)) * exposure
         let ambient = (sky.ambient * sunWeight + moonLight.ambient * (1 - sunWeight)) * exposure
-        return ResolvedLight(direction: direction, color: color, ambient: ambient, isDaytime: sunWeight >= 0.5)
+        return ResolvedLight(
+            direction: direction, skySunDirection: sun.worldDirection,
+            color: color, ambient: ambient, isDaytime: sunWeight >= 0.5)
     }
 
     private var tanHalfFieldOfView: Float {
@@ -106,6 +111,8 @@ struct CanvasView: View {
         let metalView = MetalView(
             strokes: model.strokes,
             sunDirection: light.direction,
+            skySunDirection: light.skySunDirection,
+            atmosphere: .earth,
             sunColor: light.color,
             skyAmbient: light.ambient,
             cloudParameters: context.cloudParameters,
