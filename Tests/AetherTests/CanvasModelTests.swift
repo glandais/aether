@@ -55,4 +55,29 @@ struct CanvasModelTests {
         model.undo()
         #expect(model.strokes.count == 2)
     }
+
+    @Test("Un mouvement de caméra (rotation/zoom) efface traits et historique")
+    func clearForCameraChangeResets() {
+        let model = CanvasModel()
+        model.beginStroke(at: SIMD2(0.5, 0.5))
+        model.endStroke()
+        model.undo()  // alimente la pile de rétablissement
+        #expect(model.canRedo)
+
+        model.clearForCameraChange()
+        #expect(model.strokes.isEmpty)
+        #expect(!model.canUndo)
+        #expect(!model.canRedo)
+    }
+
+    @Test("Le tangage est clampé, le lacet est libre")
+    func rotationClampsPitchNotYaw() {
+        let model = CanvasModel()
+        model.setRotation(yaw: 12, pitch: 5)
+        #expect(model.viewYaw == 12)  // lacet libre (panoramique)
+        #expect(model.viewPitch < 1.5)  // clampé sous ~80°
+
+        model.setRotation(yaw: -8, pitch: -5)
+        #expect(model.viewPitch > -1.5)
+    }
 }

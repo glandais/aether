@@ -20,8 +20,7 @@ struct CuratedLandscape: Identifiable {
             utcOffset: coordinate.longitude / 15.0 * 3600.0)  // approx. via longitude
         // Paysages curés abstraits : plein cadre (displayAspect nil).
         return SceneContext(
-            scene: scene, landscape: image,
-            depthMap: LandscapeFactory.depthMap(), displayAspect: nil,
+            scene: scene, landscape: image, displayAspect: nil,
             skyExposure: SkyExposure.estimate(from: image),
             cloudParameters: CloudParameters(weather: weather))
     }

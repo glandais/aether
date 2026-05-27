@@ -72,6 +72,24 @@
           }
         }
       }
+    },
+    "mode.lookAround" : {
+      "comment" : "Accessibilité : bouton activant la rotation du regard.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Look around"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pivoter la vue"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

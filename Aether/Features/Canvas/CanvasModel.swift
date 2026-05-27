@@ -18,6 +18,17 @@ final class CanvasModel {
     var brushRadius: Float = 0.08
     var brushSoftness: Float = 0.55
 
+    /// Mode rotation du regard : quand actif, le drag pivote la vue au lieu de
+    /// peindre. Piloté par le bouton « Pivoter la vue ».
+    var isRotating = false
+
+    /// Orientation du regard (radians) : lacet (libre) + tangage (clampé).
+    private(set) var viewYaw: Float = 0
+    private(set) var viewPitch: Float = 0
+
+    /// Limite de tangage (~80°) : empêche la bascule du regard.
+    private static let maxPitch: Float = 1.4
+
     /// Distance minimale entre deux points d'un même trait (décimation).
     private let minSpacing: Float = 0.012
 
@@ -65,6 +76,24 @@ final class CanvasModel {
         guard let next = redoStack.popLast() else { return }
         undoStack.append(strokes)
         strokes = next
+        isDrawing = false
+    }
+
+    /// Oriente le regard. Le lacet est libre (panoramique) ; le tangage est
+    /// clampé à ±`maxPitch` pour éviter la bascule.
+    func setRotation(yaw: Float, pitch: Float) {
+        viewYaw = yaw
+        viewPitch = min(max(pitch, -Self.maxPitch), Self.maxPitch)
+    }
+
+    /// « Repartir à zéro » au début d'un mouvement de caméra (rotation du regard
+    /// ou zoom/FOV) : on reframe un ciel vierge. Vide les traits **et**
+    /// l'historique (effacement non annulable, distinct de `clear`). N'affecte
+    /// ni l'orientation ni le FOV.
+    func clearForCameraChange() {
+        strokes = []
+        undoStack.removeAll()
+        redoStack.removeAll()
         isDrawing = false
     }
 

@@ -89,7 +89,7 @@ capturer, **puis retirer le code temporaire**.
 - **Filtrage de texture** : `R32Float` n'est **pas filtrable** sur GPU iOS
   (seulement sur Mac → le simulateur masque le bug). Toute texture
   échantillonnée en `filter::linear` doit être ≤ 16 bits (R8Unorm, RGBA16Float).
-  Réserver `R32Float` aux échantillonnages `nearest` (ex. depth map).
+  Réserver `R32Float` aux échantillonnages `nearest`.
 
 ## Architecture en couches strictes
 
@@ -208,18 +208,17 @@ l'écran).
 
 Référence : Hillaire 2016, Patapom, Wallis, Scratchapixel (voir `BIBLIO.md`).
 
-**Étape 6 (composition avec depth map) — terminée.**
-- [x] Depth map placeholder du paysage (`makeDepthTexture`) : ciel lointain,
-  relief de sol proche descendant vers l'écran
-- [x] `Cloud.metal` borne le raymarch à la profondeur scène (early ray
-  termination) → le nuage ne s'accumule pas derrière le relief
-- [x] Soft particles : fondu de la densité à l'approche du relief (pas d'arête
-  d'intersection franche)
-- [x] Vérifiée visuellement sur simulateur (nuage occlus par l'horizon)
+**Étape 6 (composition avec depth map) — implémentée puis retirée.**
 
-Référence : soft particles (Wolfire/Flax), Hillaire 2016 (voir `BIBLIO.md` §4).
-La depth map synthétique des paysages curés (`LandscapeFactory`) remplace la
-depth map placeholder.
+Avait été faite (occlusion du nuage par une depth map synthétique du paysage,
+early ray termination + soft particles). **Retirée depuis** : les paysages curés
+étant des dégradés atmosphériques abstraits sans relief réel, la depth map ne
+faisait que couper les nuages le long d'une ligne d'horizon arbitraire. Tout le
+pipeline de profondeur (`DepthMap` Domain, `LandscapeFactory.depthMap`,
+`Renderer.setDepthMap`/`makeDepthTexture`, échantillonnage `sceneDepth` +
+soft-particles dans `Cloud.metal`, champ `SceneContext.depthMap`) a été supprimé.
+Les nuages se peignent désormais sur tout le cadre. Le raymarch n'est plus borné
+que par l'AABB du volume.
 
 **Étape 7 (demi-résolution + amortissement temporel) — terminée.**
 - [x] Raymarch rendu hors écran à demi-résolution (RGBA16Float HDR), puis
@@ -272,12 +271,11 @@ tests.
 ## Galerie curée — **terminé**
 
 - **Navigation** : `RootView` → `GalleryView` (paysages curés) →
-  `CanvasView(context:)`. Un `SceneContext` (scène + image + depth map) circule
-  de la Feature vers le `Renderer` (qui expose `setLandscape` / `setDepthMap` :
-  Rendering ne dépend toujours que du Domain).
+  `CanvasView(context:)`. Un `SceneContext` (scène + image) circule de la Feature
+  vers le `Renderer` (qui expose `setLandscape` : Rendering ne dépend toujours
+  que du Domain).
 - **Galerie curée** : `LandscapeFactory` génère des paysages *procéduraux*
-  (dégradés atmosphériques) + depth map synthétique (`DepthMap` Domain, mappée en
-  masque d'occlusion dans `setDepthMap`). Presets dans `CuratedLandscape.catalog`
+  (dégradés atmosphériques). Presets dans `CuratedLandscape.catalog`
   (lieu + heure → astro/météo). Cadrage plein écran (`displayAspect` nil), FOV
   par défaut (`Scene.defaultFieldOfView`).
 - **Horodatage** : `Scene.utcOffset` approximé par la longitude du preset.
@@ -401,6 +399,43 @@ tire un peu vert/jaune, le crépuscule s'assombrit vite (diffusion simple, pas d
 multi-scattering ni d'afterglow). `SkyLighting` n'est plus utilisé pour le nuage
 (seul son `smoothstep` sert encore de `sunWeight`) ; les stops `skyLow`/`skyHigh`
 des palettes pourraient devenir calculés. À affiner par capture.
+
+## Caméra : pivoter le regard + zoom — **terminé**
+
+La caméra n'est plus figée face au Nord : un bouton sobre (jumeau du pinceau,
+haut-droite, icône `arrow.up.and.down.and.arrow.left.and.right`) bascule un
+**mode rotation** (`CanvasModel.isRotating`). Tout mouvement de caméra (rotation
+**ou** zoom) **efface les nuages à la prise** (`CanvasModel.clearForCameraChange`,
+non annulable) : on reframe un ciel vierge, puis on repeint.
+
+- **Pivoter le regard** (drag à 1 doigt en mode rotation) : « saisir le ciel »
+  (drag droite → ciel glisse à droite / on regarde à gauche ; drag bas → on lève
+  les yeux). Lacet libre, tangage clampé (~±80°). Le volume de nuage étant
+  relatif à la caméra (peinture en coords écran, effacée à la rotation), **seuls
+  tournent** le rayon de vue du ciel et la direction d'éclairage soleil/lune ; le
+  raymarch du nuage, le volume et le pipeline temporel sont inchangés.
+- **`Domain/CameraPose.swift`** (pur, testé) : base caméra → monde (lacet +
+  tangage) = transposée de `CelestialPosition.cameraDirection` (monde → caméra),
+  d'où la cohérence ciel ↔ éclairage. `CanvasView` calcule la base
+  (`scene.heading/pitch` + lacet/tangage utilisateur) et la passe en uniformes ;
+  `Background.metal` reconstruit le rayon depuis cette base (identité = ancien
+  rayon Nord fixe). `SkyUniforms` étendu de `camRight/camUp/camForward`
+  (`CloudUniforms` inchangé).
+- **Zoom (FOV)** : pincement à 2 doigts, **disponible seulement en mode
+  rotation** (mouvement de caméra). Pincer pour écarter → FOV plus étroit (zoom
+  avant), clampé ~25°…100°. `fovOverride` (Feature, comme `hourOverride`) →
+  `tanHalfFieldOfView` → `cameraTanHalfFov` déjà câblé (ciel + cadrage du volume).
+  Le volume étant cadré sur le frustum courant, le zoom reframe le ciel et le
+  détail du bruit ; ce n'est pas un zoom optique qui agrandit un nuage déjà peint
+  (sans objet : les nuages sont effacés à la prise).
+- *Sous l'horizon* (`Background.metal`) : teinte de sol unique (couleur `ground`
+  de la palette), assombrie selon l'angle de visée (`rayDir.y`) — ancrée à la
+  vue, pas à l'écran, pour qu'un tangage vers le bas n'expose pas le dégradé
+  vertical baké (faux second ciel / bande claire).
+- Tests : `CameraPoseTests` (base identité, orthonormalité, cas connus,
+  **invariant de cohérence** avec `cameraDirection`) ; `CanvasModelTests`
+  (`clearForCameraChange`, clamp tangage). Vérifié au simulateur (ciel
+  panoramique + soleil qui se déplacent ; FOV étroit/large).
 
 ## Reste à faire
 

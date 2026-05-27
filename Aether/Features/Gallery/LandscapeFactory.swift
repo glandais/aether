@@ -35,26 +35,4 @@ enum LandscapeFactory {
         )
         return context.makeImage()
     }
-
-    /// Depth map synthétique : ciel lointain en haut, relief proche en bas.
-    /// Convention Domain : 0 = proche, 1 = lointain (ligne par ligne, haut→bas).
-    static func depthMap(width: Int = 16, height: Int = 256) -> DepthMap {
-        var values = [Float](repeating: 1, count: width * height)
-        let horizon: Float = 0.58  // position de l'horizon (0 = haut)
-        for row in 0..<height {
-            let v = Float(row) / Float(height - 1)  // 0 = haut (ciel), 1 = bas (sol)
-            // Ciel lointain (≈1) jusqu'à l'horizon, puis se rapproche vers le bas.
-            let depth: Float
-            if v < horizon {
-                depth = 1.0
-            } else {
-                let t = (v - horizon) / (1.0 - horizon)
-                depth = 1.0 - t  // 1 (lointain) → 0 (proche)
-            }
-            for col in 0..<width {
-                values[row * width + col] = depth
-            }
-        }
-        return DepthMap(width: width, height: height, values: values)
-    }
 }

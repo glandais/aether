@@ -39,12 +39,10 @@ constant float kSigma = 11.0f;         // extinction coefficient
 constant int   kViewSteps = 64;
 constant int   kLightSteps = 6;
 constant float kLightStep = 0.15f;
-constant float kSoftDepth = 0.5f;      // soft-particle fade range near the relief
 
 // Painted density: clamp at the edges. Noise: repeat (tileable, seamless).
 constexpr sampler shapeSampler(address::clamp_to_edge, filter::linear);
 constexpr sampler noiseSampler(address::repeat, filter::linear, mip_filter::none);
-constexpr sampler depthSampler(address::clamp_to_edge, filter::nearest);
 
 static inline float remap(float v, float l0, float h0, float l1, float h1) {
     return l1 + (v - l0) * (h1 - l1) / (h0 - l0);
@@ -145,8 +143,7 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
                                constant CloudTemporal &temporal [[buffer(1)]],
                                texture3d<float> shape [[texture(0)]],
                                texture3d<float> noise [[texture(1)]],
-                               texture2d<float> sceneDepth [[texture(2)]],
-                               texture2d<float, access::read> history [[texture(3)]]) {
+                               texture2d<float, access::read> history [[texture(2)]]) {
     // Temporal amortization: only the active 2×2 cell is raymarched this frame;
     // the others reuse the previous frame (camera is fixed → same pixel).
     uint2 px = uint2(in.position.xy);
@@ -169,14 +166,8 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
     float tNear = max(hit.x, 0.0f);
     float tFar = hit.y;
 
-    // Scene depth (distance to the landscape along the ray): the cloud must not
-    // accumulate behind the relief. Far for the sky, near for the foreground.
-    float2 screenUV = float2(in.ndc.x * 0.5f + 0.5f, (1.0f - in.ndc.y) * 0.5f);
-    float sceneT = sceneDepth.sample(depthSampler, screenUV).r;
-    tFar = min(tFar, sceneT);
-
     if (tFar <= tNear) {
-        // Ray misses the volume, or the relief occludes it entirely.
+        // Ray misses the volume.
         return float4(0.0f);
     }
 
@@ -203,9 +194,6 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
         float3 p = ro + rd * t;
 
         float density = cloudDensity(p, u.time, coverageBias, shape, noise, boxMin, boxSize);
-        // Soft particles: fade the cloud as it approaches the relief, avoiding a
-        // hard intersection edge (depth maps are imprecise — see BIBLIO §4).
-        density *= smoothstep(0.0f, kSoftDepth, sceneT - t);
         if (density > 0.001f) {
             float opticalDepth = lightOpticalDepth(p, sunDir, u.time, coverageBias, shape, noise, boxMin, boxSize);
 

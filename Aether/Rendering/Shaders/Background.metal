@@ -28,6 +28,9 @@ struct SkyUniforms {
     float4 scaleHeights;       // x: Rayleigh H; y: Mie H; z: Mie g; w: sun intensity
     float4 radii;              // x: planet radius; y: atmosphere radius; z: eye height; w: exposure
     float4 camera;             // x: tan(vertical FOV / 2); y: aspect (w/h); z: ground light; w: unused
+    float4 camRight;           // xyz: camera→world basis (gaze yaw + pitch)
+    float4 camUp;
+    float4 camForward;         // xyz: gaze direction (-Z when upright/North)
 };
 
 // Fullscreen triangle generated from the vertex id — no vertex buffer needed.
@@ -153,14 +156,18 @@ fragment float4 sky_background_fragment(BackgroundInOut in [[stage_in]],
                                         texture2d<float> landscape [[texture(0)]],
                                         sampler smp [[sampler(0)]]) {
     // Reconstruct the world-space view ray. Camera convention (shared with
-    // Cloud.metal): faces North, -Z = North, +X = East, +Y = up. The curated
-    // camera is upright (no attitude tilt since photo import was removed), so
-    // camera space ≈ world space and local "up" is +Y.
+    // Cloud.metal): -Z = North, +X = East, +Y = up. The gaze can be rotated
+    // (yaw + pitch) via the camera→world basis passed from the Renderer; at the
+    // identity basis (right=+X, up=+Y, forward=-Z) this equals the fixed
+    // North-facing ray. The cloud volume stays screen-locked (painting resets on
+    // rotation), so only the sky ray and the sun lighting follow the gaze.
     const float tanHalfFov = sky.camera.x;
     const float aspect = sky.camera.y;
     const float2 ndc = float2(in.uv.x * 2.0 - 1.0, 1.0 - in.uv.y * 2.0);
     const float3 rayDir = normalize(
-        float3(ndc.x * tanHalfFov * aspect, ndc.y * tanHalfFov, -1.0));
+        ndc.x * tanHalfFov * aspect * sky.camRight.xyz +
+        ndc.y * tanHalfFov * sky.camUp.xyz +
+        sky.camForward.xyz);
 
     // Eye at the surface; planet centered at the origin so +Y is radial up.
     const float3 origin = float3(0.0, sky.radii.x + sky.radii.z, 0.0);
@@ -172,10 +179,15 @@ fragment float4 sky_background_fragment(BackgroundInOut in [[stage_in]],
     const float exposure = sky.radii.w;
     const float3 skyColor = 1.0 - exp(-radiance * exposure);
 
-    // Keep the landscape gradient below the horizon; cross-fade across it.
-    // Dim it by the ground-light factor so it darkens at night with the sky
-    // (otherwise the baked gradient stays bright under a black midnight sky).
-    const float3 ground = landscape.sample(smp, in.uv).rgb * sky.camera.z;
+    // Below the horizon: a single meaningful ground tone — the palette's ground
+    // colour (bottom row of the landscape gradient), gently darkening as the
+    // gaze points further down. Anchored to the view angle (rayDir.y), not to
+    // the screen, so pitching the gaze can't expose the baked vertical gradient
+    // (a spurious second sky / bright band) as a screen-locked sample would.
+    // Dimmed by the ground-light factor so it darkens at night with the sky.
+    const float3 groundColor = landscape.sample(smp, float2(0.5, 1.0)).rgb;
+    const float belowness = clamp(-rayDir.y * 1.5, 0.0, 1.0);
+    const float3 ground = groundColor * mix(1.0, 0.55, belowness) * sky.camera.z;
     const float blend = smoothstep(-0.01, 0.04, rayDir.y);
 
     return float4(mix(ground, skyColor, blend), 1.0);

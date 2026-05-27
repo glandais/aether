@@ -2,14 +2,12 @@ import CoreGraphics
 import Foundation
 
 /// Tout ce dont le canvas a besoin pour peindre au-dessus d'un paysage donné :
-/// la scène (lieu + instant), l'image de fond, et une depth map optionnelle
-/// pour l'occlusion. Produit par la galerie curée, consommé par
-/// `CanvasView` → `Renderer`.
+/// la scène (lieu + instant) et l'image de fond. Produit par la galerie curée,
+/// consommé par `CanvasView` → `Renderer`.
 struct SceneContext: Identifiable {
     let id = UUID()
     var scene: Scene
     var landscape: CGImage
-    var depthMap: DepthMap?
     /// Aspect (largeur/hauteur) auquel afficher le paysage sans déformation
     /// (lettrage). `nil` = plein cadre (paysages curés procéduraux abstraits).
     var displayAspect: CGFloat?

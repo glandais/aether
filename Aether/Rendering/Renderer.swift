@@ -39,7 +39,11 @@ private struct SkyUniforms {
     var rayleighScattering: SIMD4<Float>  // xyz: Rayleigh ; w: Mie
     var scaleHeights: SIMD4<Float>        // x: H Rayleigh ; y: H Mie ; z: g ; w: intensité soleil
     var radii: SIMD4<Float>               // x: rayon planète ; y: atmosphère ; z: œil ; w: exposition
-    var camera: SIMD4<Float>              // x: tan(FOV/2) ; y: aspect
+    var camera: SIMD4<Float>              // x: tan(FOV/2) ; y: aspect ; z: éclairement sol
+    // Base caméra → monde (lacet + tangage) : oriente le rayon de vue du ciel.
+    var camRight: SIMD4<Float>
+    var camUp: SIMD4<Float>
+    var camForward: SIMD4<Float>
 }
 
 /// Rendu de l'étape 4 : le paysage en texture de fond, surmonté d'un nuage dont
@@ -54,10 +58,9 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let compositePipeline: MTLRenderPipelineState
     private let stampPipeline: MTLComputePipelineState
     private let clearPipeline: MTLComputePipelineState
-    // Paysage + depth map : placeholders au départ, remplacés par la Feature
-    // (galerie curée ou photo importée) via `setLandscape` / `setDepthMap`.
+    // Paysage : placeholder au départ, remplacé par la Feature (galerie curée)
+    // via `setLandscape`.
     private var landscapeTexture: MTLTexture
-    private var depthTexture: MTLTexture
     private let noiseTexture: MTLTexture
     // Volume de densité en ping-pong (R8Unorm filtrable) : la repeinte
     // incrémentale lit l'un, écrit l'autre ; le raymarch échantillonne le courant.
@@ -96,6 +99,12 @@ final class Renderer: NSObject, MTKViewDelegate {
     // tan(FOV vertical / 2) de la caméra de la scène (défaut ≈ 53°). Cale la
     // projection du ciel et le cadrage du volume sur le zoom de la photo.
     private var cameraTanHalfFov: Float = 0.5
+
+    // Base caméra → monde du regard (lacet + tangage), résolue par la Feature.
+    // Identité par défaut : caméra droite face au Nord (-Z).
+    private var cameraRight = SIMD3<Float>(1, 0, 0)
+    private var cameraUp = SIMD3<Float>(0, 1, 0)
+    private var cameraForward = SIMD3<Float>(0, 0, -1)
 
     // Éclairage résolu par la Feature (couleur soleil par altitude × exposition
     // de la photo, et ambiance ciel). Valeurs de repli avant mise à jour.
@@ -163,11 +172,6 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
         landscapeTexture = texture
 
-        guard let depth = Renderer.makeDepthTexture(device: device) else {
-            return nil
-        }
-        depthTexture = depth
-
         let samplerDescriptor = MTLSamplerDescriptor()
         samplerDescriptor.minFilter = .linear
         samplerDescriptor.magFilter = .linear
@@ -214,6 +218,13 @@ final class Renderer: NSObject, MTKViewDelegate {
         cameraTanHalfFov = max(tanHalfFov, 0.02)
     }
 
+    /// Reçoit la base caméra → monde (lacet + tangage du regard) pour le ciel.
+    func updateCameraBasis(right: SIMD3<Float>, up: SIMD3<Float>, forward: SIMD3<Float>) {
+        cameraRight = right
+        cameraUp = up
+        cameraForward = forward
+    }
+
     /// Reçoit l'éclairage résolu (couleur soleil + ambiance) depuis la Feature.
     func updateLighting(sunColor: SIMD3<Float>, ambient: SIMD3<Float>) {
         self.sunColor = sunColor
@@ -234,41 +245,6 @@ final class Renderer: NSObject, MTKViewDelegate {
         if let texture = try? loader.newTexture(cgImage: image, options: [.SRGB: false]) {
             landscapeTexture = texture
         }
-    }
-
-    /// Remplace la depth map par celle résolue (LiDAR / Depth Anything). La
-    /// profondeur relative [0,1] (0 = proche, 1 = lointain) est mappée en
-    /// distance scène : masque d'occlusion tolérant (BIBLIO §4), le nuage
-    /// n'apparaît que dans le ciel (zones les plus lointaines).
-    func setDepthMap(_ depthMap: DepthMap) {
-        guard depthMap.width > 0, depthMap.height > 0,
-              depthMap.values.count == depthMap.width * depthMap.height else {
-            return
-        }
-        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .r32Float, width: depthMap.width, height: depthMap.height, mipmapped: false)
-        descriptor.usage = [.shaderRead]
-        descriptor.storageMode = .shared
-        guard let texture = device.makeTexture(descriptor: descriptor) else { return }
-
-        // d ≤ skyLow → relief proche (occlut) ; d ≥ skyHigh → ciel (lointain).
-        let skyLow: Float = 0.55
-        let skyHigh: Float = 0.78
-        let nearDistance: Float = 2.0
-        let far: Float = 1000.0
-        let sceneDepths = depthMap.values.map { d -> Float in
-            let t = Renderer.smoothstep(skyLow, skyHigh, d)
-            return nearDistance + (far - nearDistance) * t
-        }
-        sceneDepths.withUnsafeBytes { raw in
-            texture.replace(
-                region: MTLRegionMake2D(0, 0, depthMap.width, depthMap.height),
-                mipmapLevel: 0,
-                withBytes: raw.baseAddress!,
-                bytesPerRow: depthMap.width * MemoryLayout<Float>.stride
-            )
-        }
-        depthTexture = texture
     }
 
     /// Reçoit les traits du canvas (coord. normalisées) et met à jour le volume
@@ -350,8 +326,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         cloudEncoder.setFragmentBytes(&temporal, length: MemoryLayout<CloudTemporal>.stride, index: 1)
         cloudEncoder.setFragmentTexture(densityVolumes[currentVolumeIndex], index: 0)
         cloudEncoder.setFragmentTexture(noiseTexture, index: 1)
-        cloudEncoder.setFragmentTexture(depthTexture, index: 2)
-        cloudEncoder.setFragmentTexture(historyTarget, index: 3)
+        cloudEncoder.setFragmentTexture(historyTarget, index: 2)
         cloudEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         cloudEncoder.endEncoding()
 
@@ -371,7 +346,10 @@ final class Renderer: NSObject, MTKViewDelegate {
             radii: SIMD4(
                 atmosphere.planetRadius, atmosphere.atmosphereRadius,
                 atmosphere.eyeHeight, Renderer.skyExposure),
-            camera: SIMD4(cameraTanHalfFov, aspect, skyGroundLight, 0.0))
+            camera: SIMD4(cameraTanHalfFov, aspect, skyGroundLight, 0.0),
+            camRight: SIMD4(cameraRight.x, cameraRight.y, cameraRight.z, 0.0),
+            camUp: SIMD4(cameraUp.x, cameraUp.y, cameraUp.z, 0.0),
+            camForward: SIMD4(cameraForward.x, cameraForward.y, cameraForward.z, 0.0))
         compositeEncoder.setRenderPipelineState(skyPipeline)
         compositeEncoder.setFragmentBytes(&skyUniforms, length: MemoryLayout<SkyUniforms>.stride, index: 0)
         compositeEncoder.setFragmentTexture(landscapeTexture, index: 0)
@@ -484,11 +462,6 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     // MARK: - Construction
 
-    private static func smoothstep(_ edge0: Float, _ edge1: Float, _ x: Float) -> Float {
-        let t = min(max((x - edge0) / (edge1 - edge0), 0), 1)
-        return t * t * (3 - 2 * t)
-    }
-
     private enum Blend {
         case none
         case premultiplied
@@ -570,49 +543,6 @@ final class Renderer: NSObject, MTKViewDelegate {
         descriptor.usage = [.shaderRead, .shaderWrite]
         descriptor.storageMode = .private
         return device.makeTexture(descriptor: descriptor)
-    }
-
-    /// Depth map placeholder du paysage (étape 6) : distance scène le long du
-    /// rayon, par ligne d'écran. Ciel = lointain (le nuage passe devant) ; bande
-    /// de sol en bas = proche et se rapprochant vers le bas (occlut le nuage).
-    /// La depth map synthétique des paysages curés (`LandscapeFactory`) la
-    /// remplace via `setDepthMap`.
-    private static func makeDepthTexture(device: MTLDevice) -> MTLTexture? {
-        let width = 1
-        let height = 512
-        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .r32Float, width: width, height: height, mipmapped: false)
-        descriptor.usage = [.shaderRead]
-        descriptor.storageMode = .shared
-        guard let texture = device.makeTexture(descriptor: descriptor) else {
-            return nil
-        }
-
-        // Le ciel est lointain (le nuage, vers z = -5 ≈ t 5.5, passe devant) ;
-        // la bande de sol est un relief proche qui occlut le nuage. Le sol
-        // descend en douceur à travers la profondeur du nuage → coupe souple.
-        let far: Float = 1000.0
-        let ridgeStart: Float = 0.50  // début du relief en coord. écran (0 = haut)
-        let ridgeNear: Float = 1.4    // profondeur au bas de l'écran (très proche)
-        let ridgeFar: Float = 6.0     // profondeur au sommet du relief
-        var depths = [Float](repeating: far, count: width * height)
-        for row in 0..<height {
-            let v = Float(row) / Float(height - 1)  // 0 = haut (ciel), 1 = bas (sol)
-            if v < ridgeStart {
-                depths[row] = far
-            } else {
-                let t = Renderer.smoothstep(ridgeStart, 0.95, v)
-                depths[row] = ridgeFar + (ridgeNear - ridgeFar) * t
-            }
-        }
-
-        texture.replace(
-            region: MTLRegionMake2D(0, 0, width, height),
-            mipmapLevel: 0,
-            withBytes: depths,
-            bytesPerRow: width * MemoryLayout<Float>.stride
-        )
-        return texture
     }
 
     /// Paysage placeholder : dégradé vertical crépusculaire (sol sombre →

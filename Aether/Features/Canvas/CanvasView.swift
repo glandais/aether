@@ -14,6 +14,17 @@ struct CanvasView: View {
     /// Heure locale choisie (heures, 0…24). `nil` = heure d'origine de la scène.
     @State private var hourOverride: Double?
     @State private var showBrushControls = false
+    /// Orientation du regard au début d'un drag de rotation (lacet, tangage).
+    @State private var rotationAnchor: SIMD2<Float>?
+    /// Champ de vision choisi (radians). `nil` = FOV d'origine de la scène.
+    @State private var fovOverride: Double?
+    /// FOV au début d'un pincement, et garde anti-trait pendant le zoom.
+    @State private var fovAnchor: Double?
+    @State private var isZooming = false
+
+    /// Plage de FOV au pincement (≈25°…100°).
+    private static let minFieldOfView = 0.44
+    private static let maxFieldOfView = 1.75
 
     private let astro = SwiftAAAstroService()
     private let atmosphere = Atmosphere.earth
@@ -55,8 +66,27 @@ struct CanvasView: View {
             .padding(.bottom, 28)
         }
         .overlay(alignment: .topTrailing) {
-            brushControls.padding(.trailing, 16).padding(.top, 8)
+            VStack(alignment: .trailing, spacing: 10) {
+                rotateButton
+                brushControls
+            }
+            .padding(.trailing, 16).padding(.top, 8)
         }
+    }
+
+    /// Bascule le mode rotation du regard (jumeau du bouton pinceau).
+    private var rotateButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { model.isRotating.toggle() }
+        } label: {
+            Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                .font(.headline)
+                .foregroundStyle(model.isRotating ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                .padding(12)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(String(localized: "mode.lookAround", table: "Aether")))
     }
 
     // MARK: - Heure & éclairage
@@ -95,10 +125,15 @@ struct CanvasView: View {
         let sunWeight = SkyLighting.smoothstep(-0.08, 0.06, Float(sun.altitude))
         let moonLight = MoonLighting(moonAltitude: moon.altitude, illuminatedFraction: illumination)
 
+        // Le regard de l'utilisateur (lacet + tangage) s'ajoute à l'attitude de
+        // la scène : le soleil/la lune tournent dans le repère caméra comme le
+        // ciel (cohérence via la base partagée, cf. `CameraPose`).
+        let gazeHeading = context.scene.heading + Double(model.viewYaw)
+        let gazePitch = context.scene.pitch + Double(model.viewPitch)
         let sunDir = sun.cameraDirection(
-            heading: context.scene.heading, pitch: context.scene.pitch, roll: context.scene.roll)
+            heading: gazeHeading, pitch: gazePitch, roll: context.scene.roll)
         let moonDir = moon.cameraDirection(
-            heading: context.scene.heading, pitch: context.scene.pitch, roll: context.scene.roll)
+            heading: gazeHeading, pitch: gazePitch, roll: context.scene.roll)
         var direction = moonDir + (sunDir - moonDir) * sunWeight
         // Soleil et lune opposés : le mélange peut s'annuler → repli sur le dominant.
         direction = length(direction) < 0.01 ? (sunWeight >= 0.5 ? sunDir : moonDir) : normalize(direction)
@@ -129,14 +164,27 @@ struct CanvasView: View {
             color: color, ambient: ambient, groundLight: groundLight, isDaytime: sunWeight >= 0.5)
     }
 
+    /// FOV effectif : valeur pincée si présente, sinon celui de la scène.
+    private var effectiveFieldOfView: Double {
+        fovOverride ?? context.scene.fieldOfView
+    }
+
     private var tanHalfFieldOfView: Float {
-        Float(tan(context.scene.fieldOfView / 2))
+        Float(tan(effectiveFieldOfView / 2))
+    }
+
+    /// Base caméra → monde du regard (attitude de la scène + rotation utilisateur).
+    private var cameraPose: CameraPose {
+        CameraPose(
+            heading: context.scene.heading + Double(model.viewYaw),
+            pitch: context.scene.pitch + Double(model.viewPitch))
     }
 
     // MARK: - Vues
 
     @ViewBuilder
     private func canvas(light: ResolvedLight) -> some View {
+        let basis = cameraPose.basis
         let metalView = MetalView(
             strokes: model.strokes,
             sunDirection: light.direction,
@@ -147,8 +195,10 @@ struct CanvasView: View {
             skyAmbient: light.ambient,
             cloudParameters: context.cloudParameters,
             cameraTanHalfFov: tanHalfFieldOfView,
+            cameraRight: basis.right,
+            cameraUp: basis.up,
+            cameraForward: basis.forward,
             landscape: context.landscape,
-            depthMap: context.depthMap,
             contentID: context.id
         )
         .overlay {
@@ -158,6 +208,7 @@ struct CanvasView: View {
                 Color.clear
                     .contentShape(Rectangle())
                     .gesture(paintGesture(in: geometry.size))
+                    .simultaneousGesture(zoomGesture)
             }
         }
 
@@ -273,20 +324,81 @@ struct CanvasView: View {
 
     // MARK: - Météo
 
+    /// Sensibilité de la rotation : un drag plein écran couvre ~`yawSpan` en
+    /// lacet et ~`pitchSpan` en tangage (à caler par capture).
+    private static let yawSpan: Float = 2.0
+    private static let pitchSpan: Float = 1.6
+
     private func paintGesture(in size: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
-                let point = SIMD2(
-                    Float(value.location.x / size.width),
-                    Float(value.location.y / size.height)
-                ).clamped()
-                if model.isDrawing {
-                    model.extendStroke(to: point)
+                if isZooming { return }  // un pincement est en cours : pas de trait
+                if model.isRotating {
+                    rotate(value, in: size)
                 } else {
-                    model.beginStroke(at: point)
+                    paint(value, in: size)
                 }
             }
-            .onEnded { _ in model.endStroke() }
+            .onEnded { _ in
+                if model.isRotating {
+                    rotationAnchor = nil
+                } else {
+                    model.endStroke()
+                }
+            }
+    }
+
+    /// Pincement à deux doigts → champ de vision (zoom). Disponible **seulement
+    /// en mode rotation** (le pincement est un mouvement de caméra, comme le
+    /// drag qui pivote le regard). Pincer pour écarter (magnification > 1)
+    /// rétrécit le FOV (zoom avant) ; il efface les nuages à la prise (on
+    /// reframe un ciel vierge). Clampé entre min/max FOV.
+    private var zoomGesture: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                guard model.isRotating else { return }
+                if fovAnchor == nil {
+                    fovAnchor = effectiveFieldOfView
+                    isZooming = true
+                    model.clearForCameraChange()
+                }
+                let target = (fovAnchor ?? effectiveFieldOfView) / Double(value.magnification)
+                fovOverride = min(max(target, Self.minFieldOfView), Self.maxFieldOfView)
+            }
+            .onEnded { _ in
+                fovAnchor = nil
+                isZooming = false
+            }
+    }
+
+    /// Peinture d'un trait (coordonnées normalisées au canvas).
+    private func paint(_ value: DragGesture.Value, in size: CGSize) {
+        let point = SIMD2(
+            Float(value.location.x / size.width),
+            Float(value.location.y / size.height)
+        ).clamped()
+        if model.isDrawing {
+            model.extendStroke(to: point)
+        } else {
+            model.beginStroke(at: point)
+        }
+    }
+
+    /// Rotation du regard. « Saisir le ciel » : drag à droite → le ciel glisse
+    /// à droite (on tourne la tête à gauche) ; drag vers le bas → on lève les
+    /// yeux. Les nuages s'effacent à la prise (on pivote un ciel vierge).
+    private func rotate(_ value: DragGesture.Value, in size: CGSize) {
+        let anchor: SIMD2<Float>
+        if let existing = rotationAnchor {
+            anchor = existing
+        } else {
+            anchor = SIMD2(model.viewYaw, model.viewPitch)
+            rotationAnchor = anchor
+            model.clearForCameraChange()
+        }
+        let yaw = anchor.x - Float(value.translation.width / size.width) * Self.yawSpan
+        let pitch = anchor.y + Float(value.translation.height / size.height) * Self.pitchSpan
+        model.setRotation(yaw: yaw, pitch: pitch)
     }
 }
 

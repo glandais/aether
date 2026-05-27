@@ -3,9 +3,9 @@ import MetalKit
 import SwiftUI
 
 /// Pont SwiftUI ↔ `MTKView`. Le `Renderer` (delegate) est conservé par le
-/// Coordinator pour vivre aussi longtemps que la vue. Le paysage et la depth
-/// map ne sont (ré)appliqués que lorsque le contenu change (`contentID`) ;
-/// les traits, le soleil et la météo sont poussés à chaque mise à jour.
+/// Coordinator pour vivre aussi longtemps que la vue. Le paysage n'est
+/// (ré)appliqué que lorsque le contenu change (`contentID`) ; les traits, le
+/// soleil et la météo sont poussés à chaque mise à jour.
 struct MetalView: UIViewRepresentable {
     var strokes: [BrushStroke]
     var sunDirection: SIMD3<Float>
@@ -16,8 +16,11 @@ struct MetalView: UIViewRepresentable {
     var skyAmbient: SIMD3<Float>
     var cloudParameters: CloudParameters
     var cameraTanHalfFov: Float
+    /// Base caméra → monde (lacet + tangage du regard) pour le rayon de vue du ciel.
+    var cameraRight: SIMD3<Float>
+    var cameraUp: SIMD3<Float>
+    var cameraForward: SIMD3<Float>
     var landscape: CGImage
-    var depthMap: DepthMap?
     var contentID: UUID
 
     func makeCoordinator() -> Coordinator {
@@ -41,9 +44,6 @@ struct MetalView: UIViewRepresentable {
 
         if context.coordinator.appliedContentID != contentID {
             renderer.setLandscape(landscape)
-            if let depthMap {
-                renderer.setDepthMap(depthMap)
-            }
             context.coordinator.appliedContentID = contentID
         }
 
@@ -52,6 +52,7 @@ struct MetalView: UIViewRepresentable {
         renderer.updateLighting(sunColor: sunColor, ambient: skyAmbient)
         renderer.updateCloudParameters(cloudParameters)
         renderer.updateFieldOfView(cameraTanHalfFov)
+        renderer.updateCameraBasis(right: cameraRight, up: cameraUp, forward: cameraForward)
         renderer.updateStrokes(strokes)
     }
 
