@@ -49,7 +49,6 @@ private struct SkyUniforms {
 final class Renderer: NSObject, MTKViewDelegate {
     private let device: MTLDevice
     private let commandQueue: MTLCommandQueue
-    private let backgroundPipeline: MTLRenderPipelineState
     private let skyPipeline: MTLRenderPipelineState
     private let cloudPipeline: MTLRenderPipelineState
     private let compositePipeline: MTLRenderPipelineState
@@ -127,7 +126,6 @@ final class Renderer: NSObject, MTKViewDelegate {
         view.device = device
 
         guard let backgroundVertex = library.makeFunction(name: "background_vertex"),
-              let backgroundFragment = library.makeFunction(name: "background_fragment"),
               let skyFragment = library.makeFunction(name: "sky_background_fragment"),
               let cloudVertex = library.makeFunction(name: "cloud_vertex"),
               let cloudFragment = library.makeFunction(name: "cloud_fragment"),
@@ -140,11 +138,9 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         let format = view.colorPixelFormat
         do {
-            backgroundPipeline = try Renderer.makePipeline(
-                device: device, vertex: backgroundVertex, fragment: backgroundFragment,
-                pixelFormat: format, blend: .none)
-            // Ciel atmosphérique dynamique (suit le soleil). Réutilise le
-            // vertex plein écran du fond ; échantillonne le paysage sous l'horizon.
+            // Ciel atmosphérique dynamique (suit le soleil). `background_vertex`
+            // est le triangle plein écran partagé ; échantillonne le paysage
+            // sous l'horizon.
             skyPipeline = try Renderer.makePipeline(
                 device: device, vertex: backgroundVertex, fragment: skyFragment,
                 pixelFormat: format, blend: .none)

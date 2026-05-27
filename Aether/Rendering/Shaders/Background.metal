@@ -1,18 +1,14 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// Background pass. Draws the scene behind the volumetric clouds.
+// Background pass. Draws the dynamic atmospheric sky behind the clouds.
 //
-// `background_fragment` is the original placeholder: it samples the curated
-// landscape gradient fullscreen. It is still the one wired in `Renderer`.
-//
-// `sky_background_fragment` is the dynamic-atmosphere sketch: it reconstructs a
-// world-space view ray per pixel and integrates Rayleigh + Mie single
-// scattering toward the sun direction, so the sky above the horizon follows the
-// real sun position (driven by the hour slider via AstroService). Below the
-// horizon it keeps the landscape gradient. Switching the background pipeline to
-// this entry point + feeding `SkyUniforms` is the remaining Renderer wiring
-// step (see CLAUDE.md "Fond de ciel dynamique").
+// `sky_background_fragment` reconstructs a world-space view ray per pixel and
+// integrates Rayleigh + Mie single scattering toward the sun direction, so the
+// sky above the horizon follows the real sun position (driven by the hour
+// slider via AstroService). Below the horizon it keeps the curated landscape
+// gradient (dimmed by the ground-light factor). `background_vertex` is the
+// shared fullscreen triangle.
 //
 // Reference: CesiumJS AtmosphereCommon.glsl (computeScattering), Nishita 1993,
 // Hillaire 2020. See BIBLIO.md.
@@ -47,12 +43,6 @@ vertex BackgroundInOut background_vertex(uint vertexID [[vertex_id]]) {
     out.position = float4(p, 0.0, 1.0);
     out.uv = float2(p.x * 0.5 + 0.5, 1.0 - (p.y * 0.5 + 0.5));
     return out;
-}
-
-fragment float4 background_fragment(BackgroundInOut in [[stage_in]],
-                                    texture2d<float> landscape [[texture(0)]],
-                                    sampler smp [[sampler(0)]]) {
-    return landscape.sample(smp, in.uv);
 }
 
 // --- Dynamic atmosphere -----------------------------------------------------

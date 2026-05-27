@@ -371,8 +371,9 @@ Vérifié au simulateur : midi → ciel bleu, coucher → rougeoiement bas-horiz
   simple Rayleigh + Mie (marche primaire + light-march vers le soleil) →
   rougeoiement bas-soleil et halo de Mie *gratuits*, pilotés par la même
   `sunDirection` que le nuage. Sous l'horizon : dégradé paysage conservé
-  (cross-fade sur `rayDir.y`). `background_fragment` (placeholder) reste l'entrée
-  câblée comme repli ; `sky_background_fragment` est l'entrée active.
+  (cross-fade sur `rayDir.y`), assombri par le facteur d'éclairement de sol
+  (`camera.z`). `background_vertex` (triangle plein écran) est partagé ;
+  l'ancien `background_fragment` placeholder a été retiré.
 
 **Choix d'implémentation** : marche temps réel par pixel (pas de LUT). Caméra
 fixe + soleil lent → le fond est cacheable et négligeable devant le raymarch
