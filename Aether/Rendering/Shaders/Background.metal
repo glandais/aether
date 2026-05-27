@@ -429,11 +429,28 @@ fragment float4 sky_background_fragment(BackgroundInOut in [[stage_in]],
         skyColor = 1.0 - exp(-radiance * exposure);
     }
 
+    const float3 discMoonDir = normalize(sky.moonDirection.xyz);
+
+    // Moonlight in the sky. The moon, like the sun, should glow and tint the sky —
+    // but a full atmospheric integral toward the moon adds a warm grazing-horizon
+    // band that reads as a false dawn at night. Instead, an analytic cool halo: a
+    // soft forward lobe around the disc (the *glow*) plus a faint overall lift so
+    // the night sky picks up the moonlight rather than staying pure black (its
+    // *incidence on the sky colour*). Tinted by the moonlight colour (cool, scaled
+    // by phase + altitude via moonGlint), night-gated, and skipped when the moon is
+    // down — cheap and free of the false-dawn band.
+    const float nightW = sky.moonDirection.w;
+    if (nightW > 0.0 && discMoonDir.y > -0.05) {
+        const float cosToMoon = max(dot(rayDir, discMoonDir), 0.0);
+        const float halo = pow(cosToMoon, 250.0) * 0.6 + pow(cosToMoon, 8.0) * 0.05;
+        const float lift = 0.015 * smoothstep(0.0, 0.3, discMoonDir.y);
+        skyColor += sky.moonGlint.xyz * (halo + lift) * nightW;
+    }
+
     // Sun & moon discs, added as display-referred colours on top of the tonemapped
     // sky (a low-radiance moon would be crushed if injected before the exposure
     // curve). The ground/sea mix below clips any disc that crosses the horizon, and
     // the later cloud composite pass occludes them where clouds are painted.
-    const float3 discMoonDir = normalize(sky.moonDirection.xyz);
     skyColor += sunDisc(rayDir, sunDir, sky);
     skyColor += moonDisc(rayDir, sunDir, discMoonDir, sky);
 

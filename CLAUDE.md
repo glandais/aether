@@ -494,6 +494,11 @@ et suivant le regard/zoom *gratuitement* puisque le rayon de vue est en monde).
   l'orientation découlent des **seules** directions apparentes du Soleil et de la
   Lune (aucune donnée astro supplémentaire) ; terminateur doux, *earthshine*
   ténue sur la face sombre, léger *mottling* de surface (`moonDisc`).
+- **Halo lunaire** : comme le soleil, la lune *éclaire* le ciel — halo froid
+  analytique (lobe avant `pow(cosToMoon,…)`) + lift bleuté ténu, teinté par
+  `moonGlint` (donc échelonné par phase/altitude), *night-gated*. Choix d'un halo
+  analytique plutôt que d'une 2ᵉ intégrale atmosphérique vers la lune : cette
+  dernière ajoutait une bande chaude rasante à l'horizon (fausse aube nocturne).
 - **Taille constante avec l'heure** (décidé) : le diamètre apparent réel varie à
   peine sur une journée, le « gros soleil à l'horizon » est une illusion
   perceptive non reproductible, et l'aplatissement par réfraction a été écarté.
