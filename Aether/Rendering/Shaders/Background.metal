@@ -31,7 +31,7 @@ struct SkyUniforms {
     float4 rayleighScattering; // xyz: Rayleigh coeff (m⁻¹); w: Mie coeff (m⁻¹)
     float4 scaleHeights;       // x: Rayleigh H; y: Mie H; z: Mie g; w: sun intensity
     float4 radii;              // x: planet radius; y: atmosphere radius; z: eye height; w: exposure
-    float4 camera;             // x: tan(vertical FOV / 2); y: aspect (w/h); zw: unused
+    float4 camera;             // x: tan(vertical FOV / 2); y: aspect (w/h); z: ground light; w: unused
 };
 
 // Fullscreen triangle generated from the vertex id — no vertex buffer needed.
@@ -183,7 +183,9 @@ fragment float4 sky_background_fragment(BackgroundInOut in [[stage_in]],
     const float3 skyColor = 1.0 - exp(-radiance * exposure);
 
     // Keep the landscape gradient below the horizon; cross-fade across it.
-    const float3 ground = landscape.sample(smp, in.uv).rgb;
+    // Dim it by the ground-light factor so it darkens at night with the sky
+    // (otherwise the baked gradient stays bright under a black midnight sky).
+    const float3 ground = landscape.sample(smp, in.uv).rgb * sky.camera.z;
     const float blend = smoothstep(-0.01, 0.04, rayDir.y);
 
     return float4(mix(ground, skyColor, blend), 1.0);

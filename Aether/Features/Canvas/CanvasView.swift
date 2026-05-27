@@ -35,6 +35,8 @@ struct CanvasView: View {
         var skySunDirection: SIMD3<Float>
         var color: SIMD3<Float>
         var ambient: SIMD3<Float>
+        /// Éclairement du sol (0 nuit → 1 jour) : assombrit le paysage la nuit.
+        var groundLight: Float
         var isDaytime: Bool
     }
 
@@ -116,9 +118,15 @@ struct CanvasView: View {
         let exposure = context.skyExposure
         let color = (sunDayColor * sunWeight + moonLight.color * (1 - sunWeight)) * exposure
         let ambient = (ambientDayColor * sunWeight + moonLight.ambient * (1 - sunWeight)) * exposure
+
+        // Sol éclairé par le jour, avec un plancher lunaire (pas de bande claire
+        // sous un ciel noir de minuit).
+        let moonLuma = 0.2126 * moonLight.color.x + 0.7152 * moonLight.color.y + 0.0722 * moonLight.color.z
+        let groundLight = max(sunWeight, min(moonLuma * 0.06, 0.15), 0.02)
+
         return ResolvedLight(
             direction: direction, skySunDirection: sun.worldDirection,
-            color: color, ambient: ambient, isDaytime: sunWeight >= 0.5)
+            color: color, ambient: ambient, groundLight: groundLight, isDaytime: sunWeight >= 0.5)
     }
 
     private var tanHalfFieldOfView: Float {
@@ -134,6 +142,7 @@ struct CanvasView: View {
             sunDirection: light.direction,
             skySunDirection: light.skySunDirection,
             atmosphere: atmosphere,
+            groundLight: light.groundLight,
             sunColor: light.color,
             skyAmbient: light.ambient,
             cloudParameters: context.cloudParameters,

@@ -84,6 +84,9 @@ final class Renderer: NSObject, MTKViewDelegate {
     // nuage, qui passe à la lune la nuit) + paramètres de diffusion.
     private var skySunDirection = SIMD3<Float>(0.40, 0.12, -0.50)
     private var atmosphere = Atmosphere.earth
+    // Niveau d'éclairement du sol (0 nuit → 1 jour) : assombrit le paysage sous
+    // l'horizon avec le ciel.
+    private var skyGroundLight: Float = 1
     // Exposition du tonemap ciel (à régler par capture).
     private static let skyExposure: Float = 1.0
 
@@ -221,10 +224,12 @@ final class Renderer: NSObject, MTKViewDelegate {
         self.skyAmbient = ambient
     }
 
-    /// Reçoit la direction monde du soleil et l'atmosphère pour le ciel dynamique.
-    func updateSky(sunDirection: SIMD3<Float>, atmosphere: Atmosphere) {
+    /// Reçoit la direction monde du soleil, l'atmosphère et le niveau de sol
+    /// pour le ciel dynamique.
+    func updateSky(sunDirection: SIMD3<Float>, atmosphere: Atmosphere, groundLight: Float) {
         self.skySunDirection = sunDirection
         self.atmosphere = atmosphere
+        self.skyGroundLight = groundLight
     }
 
     /// Remplace le paysage de fond par l'image fournie (galerie ou photo).
@@ -370,7 +375,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             radii: SIMD4(
                 atmosphere.planetRadius, atmosphere.atmosphereRadius,
                 atmosphere.eyeHeight, Renderer.skyExposure),
-            camera: SIMD4(cameraTanHalfFov, aspect, 0.0, 0.0))
+            camera: SIMD4(cameraTanHalfFov, aspect, skyGroundLight, 0.0))
         compositeEncoder.setRenderPipelineState(skyPipeline)
         compositeEncoder.setFragmentBytes(&skyUniforms, length: MemoryLayout<SkyUniforms>.stride, index: 0)
         compositeEncoder.setFragmentTexture(landscapeTexture, index: 0)

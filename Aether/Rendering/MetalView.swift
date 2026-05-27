@@ -11,6 +11,7 @@ struct MetalView: UIViewRepresentable {
     var sunDirection: SIMD3<Float>
     var skySunDirection: SIMD3<Float>
     var atmosphere: Atmosphere
+    var groundLight: Float
     var sunColor: SIMD3<Float>
     var skyAmbient: SIMD3<Float>
     var cloudParameters: CloudParameters
@@ -47,7 +48,7 @@ struct MetalView: UIViewRepresentable {
         }
 
         renderer.updateSunDirection(sunDirection)
-        renderer.updateSky(sunDirection: skySunDirection, atmosphere: atmosphere)
+        renderer.updateSky(sunDirection: skySunDirection, atmosphere: atmosphere, groundLight: groundLight)
         renderer.updateLighting(sunColor: sunColor, ambient: skyAmbient)
         renderer.updateCloudParameters(cloudParameters)
         renderer.updateFieldOfView(cameraTanHalfFov)
