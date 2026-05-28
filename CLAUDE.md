@@ -201,9 +201,10 @@ Référence : Schneider 2015/2017, Häggström, Bitsquid (voir `BIBLIO.md`).
 - [x] Vérifiée visuellement sur simulateur (iPhone 17 Pro)
 
 Référence : Schneider 2017 (authoring), Häggström (voir `BIBLIO.md`).
-Simplifications connues : repeinte intégrale du volume à chaque trait (pas
-d'incrémental) ; pinceau rond en coords normalisées (légèrement elliptique à
-l'écran).
+Simplifications de l'étape, **levées depuis** : repeinte intégrale du volume à
+chaque trait → repeinte incrémentale (cf. « Pinceau ») ; pinceau elliptique à
+l'écran (coords normalisées brutes) → corrigé de l'aspect (cf. « Orientation
+paysage »).
 
 **Étape 5 (scattering atmosphérique) — terminée.**
 - [x] Fonction de phase Henyey-Greenstein double-lobe (avant + arrière) selon
@@ -567,6 +568,33 @@ nuages**, et **world-locked** (suivent le regard/zoom comme le reste du ciel).
   Vérifié au simulateur (nuit Paris) : champ d'étoiles colorées au-dessus de
   l'horizon, scintillant ; occultées par une bande de nuage peinte ; absentes le jour.
 
+## Orientation paysage — **terminé**
+
+L'app tourne librement en **portrait + paysage** (gauche/droite). Le pipeline de
+rendu était déjà indépendant de l'orientation (`Renderer.draw` recalcule
+`aspect = largeur/hauteur` par frame, recrée les cibles demi-rés sur
+`drawableSizeWillChange`, et les shaders appliquent l'aspect à l'axe X) ;
+restaient deux finitions côté Feature/pinceau :
+
+- **Config** : `INFOPLIST_KEY_UISupportedInterfaceOrientations` (project.yml)
+  liste portrait + `LandscapeLeft`/`LandscapeRight`. `UIRequiresFullScreen: YES`
+  est conservé (exemption ITMS-90474 iPad + plein écran contemplatif).
+- **Curseur d'heure** (`CanvasView.timeBar`) : capé à `maxWidth: 520` — sinon le
+  slider collerait aux bords en paysage. Les autres contrôles sont des overlays
+  alignés dans la safe area, donc se replacent seuls (vérifié : boutons dégagés
+  de la Dynamic Island, barres centrées).
+- **Pinceau circulaire quelle que soit l'orientation** : les dabs sont stockés en
+  coords normalisées `[0,1]²` et stampés en *distance écran-proportionnelle*
+  (`stamp_density_volume` reçoit `aspect` et met `delta.x *= aspect`) → un coup de
+  pinceau projette un cercle à l'écran, en portrait **comme** en paysage (corrige
+  aussi l'ellipticité préexistante en portrait). À la rotation, l'aspect change :
+  le `Renderer` conserve la liste complète des dabs et **repeint tout le volume**
+  au nouvel aspect (`stampedAspect` ≠ `lastAspect` → `clearVolume` + restamp dans
+  `draw`), donc les nuages déjà peints restent ronds. La passe incrémentale en
+  régime stable est inchangée (un seul dispatch en plus, à la rotation).
+- Vérifié au simulateur (iPhone 17 Pro) : portrait et paysage, nuage rond dans
+  les deux ; build + 42 tests verts.
+
 ## Distribution App Store / TestFlight — **pipeline en place**
 
 L'app est distribuée via le CLI **`asc`** (auth par clé d'équipe dans le
@@ -587,11 +615,12 @@ release publique App Store reste à faire (métadonnées, captures, App Privacy)
 ### Réglages `project.yml` exigés par la distribution
 
 - `UIRequiresFullScreen: YES` — **obligatoire** : la cible est universelle
-  (iPhone+iPad) mais portrait-only ; sans ce flag, l'**ingestion App Store
-  échoue silencieusement** sur **ITMS-90474** (« apps iPad doivent supporter
-  toutes les orientations sauf si plein écran »). Le build n'apparaît alors
-  jamais sur TestFlight. Vérifier l'erreur via `asc builds uploads list`, pas
-  seulement `asc builds list` (qui reste vide en cas d'échec d'ingestion).
+  (iPhone+iPad) et ne déclare qu'un sous-ensemble d'orientations
+  (portrait + paysage, **pas** portrait-renversé) ; sans ce flag, l'**ingestion
+  App Store échoue silencieusement** sur **ITMS-90474** (« apps iPad doivent
+  supporter toutes les orientations sauf si plein écran »). Le build n'apparaît
+  alors jamais sur TestFlight. Vérifier l'erreur via `asc builds uploads list`,
+  pas seulement `asc builds list` (qui reste vide en cas d'échec d'ingestion).
 - `ITSAppUsesNonExemptEncryption: NO` — évite la question de conformité export à
   chaque build (chiffrement « exempt »).
 - `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` : bumper avant chaque archive ;
