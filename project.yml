@@ -24,6 +24,9 @@ packages:
   SwiftAA:
     url: https://github.com/onekiloparsec/SwiftAA
     from: "3.0.1"
+  tzf:
+    url: https://github.com/ringsaturn/tzf-swift.git
+    from: "1.2.2"
 
 targets:
   Aether:
@@ -33,6 +36,8 @@ targets:
       - path: Aether
     dependencies:
       - package: SwiftAA
+      - package: tzf
+        product: tzf
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.glandais.aether

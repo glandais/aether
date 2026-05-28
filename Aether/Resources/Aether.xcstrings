@@ -18,6 +18,24 @@
         }
       }
     },
+    "action.cancel" : {
+      "comment" : "Bouton annulant la sélection (feuille de choix du lieu).",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancel"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Annuler"
+          }
+        }
+      }
+    },
     "action.clear" : {
       "comment" : "Bouton effaçant tous les nuages peints.",
       "extractionState" : "stale",
@@ -32,6 +50,24 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Effacer"
+          }
+        }
+      }
+    },
+    "action.confirm" : {
+      "comment" : "Bouton validant le lieu choisi sur la carte.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Valider"
           }
         }
       }
@@ -86,6 +122,58 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Peignez le ciel."
+          }
+        }
+      }
+    },
+    "location.current" : {
+      "comment" : "Accessibilité : bouton recentrant la carte sur la position actuelle.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Current location"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ma position"
+          }
+        }
+      }
+    },
+    "location.hereNow" : {
+      "comment" : "Accessibilité : bouton recalant lieu, jour et heure sur l'instant courant.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Here and now"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ici et maintenant"
+          }
+        }
+      }
+    },
+    "location.title" : {
+      "comment" : "Titre de la feuille de choix du lieu ; label de la barre.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Location"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lieu"
           }
         }
       }

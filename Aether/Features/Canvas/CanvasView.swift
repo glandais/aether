@@ -16,6 +16,14 @@ struct CanvasView: View {
     /// Jour choisi. `nil` = date d'origine de la scène. Déplace soleil, lune et
     /// étoiles (saison, phase lunaire) sans toucher au cadrage.
     @State private var dateOverride: Date?
+    /// Lieu choisi. `nil` = lieu d'origine de la scène. Repositionne soleil,
+    /// lune et étoiles (et, via `timeZoneOverride`, le fuseau de l'heure locale).
+    @State private var coordinateOverride: GeoCoordinate?
+    /// Fuseau résolu (tzf) pour le lieu choisi. `nil` = fuseau d'origine.
+    @State private var timeZoneOverride: TimeZone?
+    @State private var showLocationPicker = false
+    /// Résolution « ici & maintenant » en cours (position GPS + fuseau).
+    @State private var isResolvingHereNow = false
     @State private var showBrushControls = false
     /// Révèle toutes les options (retour, regard, pinceau, heure). Replié par
     /// défaut : seule la bascule « Options » est visible, pour un ciel dégagé.
@@ -42,6 +50,8 @@ struct CanvasView: View {
 
     private let astro = SwiftAAAstroService()
     private let atmosphere = Atmosphere.earth
+    private let timeZoneService = TzfTimeZoneService()
+    private let locationService = CoreLocationService()
 
     // Échelles ramenant la radiance atmosphérique dans la plage de travail du
     // nuage (réglées par capture). La couleur/teinte vient de l'atmosphère ; ces
@@ -96,7 +106,7 @@ struct CanvasView: View {
                     if model.canUndo || model.canRedo || !model.strokes.isEmpty {
                         editToolbar
                     }
-                    dateBar
+                    locationDateBar
                     timeBar(isDaytime: light.isDaytime)
                 }
                 .padding(.bottom, 28)
@@ -118,6 +128,17 @@ struct CanvasView: View {
         // Recalcul des étoiles hors `body` : seulement au changement de lieu/heure
         // (bucket ~60 s), pas à chaque frame de rotation/zoom.
         .task(id: starKey) { recomputeStars() }
+        .sheet(isPresented: $showLocationPicker) {
+            LocationPickerView(
+                initial: effectiveCoordinate, locationService: locationService
+            ) { coordinate in
+                coordinateOverride = coordinate
+                // Coordonnée appliquée tout de suite (astro/étoiles) ; le fuseau
+                // se corrige dès la résolution tzf (bref décalage du seul libellé
+                // d'heure, sans incidence sur le ciel).
+                Task { timeZoneOverride = await timeZoneService.timeZone(for: coordinate) }
+            }
+        }
     }
 
     /// Clé de recalcul des étoiles : lieu + tranche de temps (~60 s ; la rotation
@@ -130,14 +151,14 @@ struct CanvasView: View {
 
     private var starKey: StarKey {
         StarKey(
-            latitude: context.scene.coordinate.latitude,
-            longitude: context.scene.coordinate.longitude,
+            latitude: effectiveCoordinate.latitude,
+            longitude: effectiveCoordinate.longitude,
             timeBucket: Int(effectiveDate.timeIntervalSince1970 / 60))
     }
 
     /// Résout les directions monde des étoiles visibles pour l'instant courant.
     private func recomputeStars() {
-        let coordinate = context.scene.coordinate
+        let coordinate = effectiveCoordinate
         let sidereal = StarCatalog.localSiderealTime(
             date: effectiveDate, longitudeEast: coordinate.longitude)
         starField = StarCatalog.visibleStars(
@@ -179,12 +200,18 @@ struct CanvasView: View {
 
     // MARK: - Heure & éclairage
 
-    private var sceneTimeZone: TimeZone { context.scene.timeZone }
+    /// Lieu effectif : choisi par l'utilisateur, sinon celui de la scène.
+    private var effectiveCoordinate: GeoCoordinate {
+        coordinateOverride ?? context.scene.coordinate
+    }
+
+    /// Fuseau effectif : résolu pour le lieu choisi (tzf), sinon celui de la scène.
+    private var effectiveTimeZone: TimeZone { timeZoneOverride ?? context.scene.timeZone }
 
     /// Heure locale d'origine de la scène (heures décimales).
     private var initialHour: Double {
         var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = sceneTimeZone
+        calendar.timeZone = effectiveTimeZone
         let components = calendar.dateComponents([.hour, .minute], from: context.scene.date)
         return Double(components.hour ?? 12) + Double(components.minute ?? 0) / 60.0
     }
@@ -200,7 +227,7 @@ struct CanvasView: View {
     /// Jour local d'origine de la scène, ramené à midi UTC pour le sélecteur.
     private var defaultDay: Date {
         var sceneCalendar = Calendar(identifier: .gregorian)
-        sceneCalendar.timeZone = sceneTimeZone
+        sceneCalendar.timeZone = effectiveTimeZone
         let day = sceneCalendar.dateComponents([.year, .month, .day], from: context.scene.date)
         return Self.noonUTC(day) ?? context.scene.date
     }
@@ -212,7 +239,7 @@ struct CanvasView: View {
         utc.timeZone = .gmt
         let day = utc.dateComponents([.year, .month, .day], from: effectiveDay)
         var sceneCalendar = Calendar(identifier: .gregorian)
-        sceneCalendar.timeZone = sceneTimeZone
+        sceneCalendar.timeZone = effectiveTimeZone
         var startComponents = DateComponents()
         startComponents.year = day.year
         startComponents.month = day.month
@@ -236,7 +263,7 @@ struct CanvasView: View {
     /// Soleil le jour, lune la nuit (fondu au crépuscule), calé sur l'exposition.
     private var resolvedLight: ResolvedLight {
         let date = effectiveDate
-        let coordinate = context.scene.coordinate
+        let coordinate = effectiveCoordinate
         let sun = astro.position(of: .sun, at: coordinate, date: date)
         let moon = astro.position(of: .moon, at: coordinate, date: date)
         let illumination = astro.moonIlluminatedFraction(date: date)
@@ -372,29 +399,104 @@ struct CanvasView: View {
         }
     }
 
-    /// Sélecteur de date : déplace le jour de la scène (saison, phase lunaire,
-    /// ciel étoilé), l'heure et le cadrage restant inchangés.
-    private var dateBar: some View {
+    /// Lieu + date compactés sur une ligne, précédés du bouton « ici &
+    /// maintenant ». Le lieu ouvre la carte ; la date déplace le jour (saison,
+    /// phase lunaire, ciel étoilé), heure et cadrage inchangés.
+    private var locationDateBar: some View {
         let day = Binding(
             get: { effectiveDay },
             set: { dateOverride = $0 }
         )
-        return HStack(spacing: 12) {
-            Image(systemName: "calendar")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            DatePicker("", selection: day, displayedComponents: .date)
-                .labelsHidden()
-                .environment(\.timeZone, .gmt)
-                .environment(\.calendar, Calendar(identifier: .gregorian))
-                .accessibilityLabel(Text(String(localized: "time.date", table: "Aether")))
-            Spacer(minLength: 0)
+        return HStack(spacing: 10) {
+            hereNowButton
+            HStack(spacing: 10) {
+                Button {
+                    showLocationPicker = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "globe")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Text(locationLabel)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text(String(localized: "location.title", table: "Aether")))
+
+                Divider().frame(height: 18)
+
+                Image(systemName: "calendar")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                DatePicker("", selection: day, displayedComponents: .date)
+                    .labelsHidden()
+                    .environment(\.timeZone, .gmt)
+                    .environment(\.calendar, Calendar(identifier: .gregorian))
+                    .accessibilityLabel(Text(String(localized: "time.date", table: "Aether")))
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial, in: Capsule())
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 8)
-        .background(.ultraThinMaterial, in: Capsule())
-        .frame(maxWidth: 520)
+        .frame(maxWidth: 560)
         .padding(.horizontal, 24)
+    }
+
+    /// « Ici & maintenant » : recale lieu (GPS), jour et heure sur l'instant
+    /// courant de l'utilisateur.
+    private var hereNowButton: some View {
+        Button(action: resetToHereAndNow) {
+            Group {
+                if isResolvingHereNow {
+                    ProgressView()
+                } else {
+                    Image(systemName: "scope")
+                }
+            }
+            .font(.headline)
+            .foregroundStyle(.tint)
+            .frame(width: 44, height: 44)
+            .background(.ultraThinMaterial, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isResolvingHereNow)
+        .accessibilityLabel(Text(String(localized: "location.hereNow", table: "Aether")))
+    }
+
+    /// Recale lieu (position GPS), jour et heure sur l'instant courant. Échec
+    /// silencieux si la position est indisponible (refus, pas de fix).
+    private func resetToHereAndNow() {
+        isResolvingHereNow = true
+        Task {
+            defer { isResolvingHereNow = false }
+            guard let coordinate = try? await locationService.currentCoordinate() else { return }
+            let zone = await timeZoneService.timeZone(for: coordinate)
+            coordinateOverride = coordinate
+            timeZoneOverride = zone
+            // Instant courant dans le fuseau résolu, exprimé comme les sélecteurs :
+            // jour ancré à midi UTC, heure locale décimale.
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = zone ?? .current
+            let components = calendar.dateComponents(
+                [.year, .month, .day, .hour, .minute], from: Date())
+            dateOverride = Self.noonUTC(components)
+            hourOverride = Double(components.hour ?? 12) + Double(components.minute ?? 0) / 60
+        }
+    }
+
+    /// Coordonnée effective compacte, ex. « 48.9°N, 2.4°E ».
+    private var locationLabel: String {
+        let coordinate = effectiveCoordinate
+        let lat = String(
+            format: "%.1f°%@", abs(coordinate.latitude), coordinate.latitude >= 0 ? "N" : "S")
+        let lon = String(
+            format: "%.1f°%@", abs(coordinate.longitude), coordinate.longitude >= 0 ? "E" : "W")
+        return "\(lat), \(lon)"
     }
 
     /// Curseur d'heure : déplace le soleil/la lune, le nuage se rallume.
@@ -425,7 +527,7 @@ struct CanvasView: View {
     private var timeLabel: String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = sceneTimeZone
+        formatter.timeZone = effectiveTimeZone
         formatter.dateFormat = "HH:mm"
         return formatter.string(from: effectiveDate)
     }
