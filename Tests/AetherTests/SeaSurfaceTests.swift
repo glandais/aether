@@ -26,6 +26,7 @@ struct SeaSurfaceTests {
                 skyLow: .init(gray: 0.6, alpha: 1), skyHigh: .init(gray: 0.2, alpha: 1)),
             coordinate: GeoCoordinate(latitude: 0, longitude: 0),
             date: .init(timeIntervalSince1970: 0),
+            timeZoneIdentifier: "UTC",
             weather: WeatherSnapshot(
                 condition: .clear, cloudCover: 0.1, humidity: 0.4,
                 windSpeed: 1, temperature: 20))
@@ -41,6 +42,7 @@ struct SeaSurfaceTests {
                 skyLow: .init(gray: 0.6, alpha: 1), skyHigh: .init(gray: 0.2, alpha: 1)),
             coordinate: GeoCoordinate(latitude: 0, longitude: 0),
             date: .init(timeIntervalSince1970: 0),
+            timeZoneIdentifier: "UTC",
             weather: WeatherSnapshot(
                 condition: .clear, cloudCover: 0.1, humidity: 0.4,
                 windSpeed: 1, temperature: 20),
