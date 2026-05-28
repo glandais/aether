@@ -147,6 +147,14 @@ IAP, analytics, crash reporting.
 
 ## État d'avancement
 
+**Distribution — App Store.** Pipeline de rendu complet (étapes 1→9) plus
+galerie curée, éclairage selon la scène, météo statique, heure choisie + lune,
+fond de ciel atmosphérique, caméra à regard libre, mer raymarchée, et soleil /
+lune / étoiles dessinés dans le ciel — tout est implémenté et vérifié. Version
+courante : **`1.0.1` (build 2)**, bundle `io.github.glandais.aether`
+(`MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` dans `project.yml`). Détail des
+étapes ci-dessous.
+
 **Étape 0 (bootstrap) — terminée.** Projet XcodeGen, structure en couches,
 modèles Domain, protocoles Services, app SwiftUI lançable, test de fumée,
 signature équipe. Build + test verts.
