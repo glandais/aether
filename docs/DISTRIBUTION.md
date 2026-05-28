@@ -30,7 +30,38 @@ Skills `asc-*` pour l'outillage.
 - `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` : bumper avant chaque archive ;
   garder le numéro de build **monotone croissant** sur l'app entière.
 
-## Flux complet (release iOS)
+## Release automatisée TestFlight
+
+Pour publier une nouvelle build sur TestFlight en une commande :
+
+```sh
+scripts/release-testflight.sh
+```
+
+Le script (source de vérité = `project.yml`, jamais le `.pbxproj`) :
+
+1. **auto-bump** le patch (`MARKETING_VERSION` x.y.z → x.y.(z+1)) **et** le numéro
+   de build (monotone : `max(local, max ASC) + 1`), puis `xcodegen generate` ;
+2. archive (Release, signature auto) puis exporte l'IPA
+   (`scripts/ExportOptions.plist`, commité — `build/` est git-ignoré) ;
+3. `asc publish testflight --wait` : upload + attente du traitement +
+   distribution au groupe interne + note « What to Test ».
+
+Pas de changelog calculé : la note est un simple horodatage `Version x.y.z
+(build n)`. Variables d'environnement (optionnelles) :
+
+| Var | Défaut | Rôle |
+|---|---|---|
+| `ASC_APP_ID` | `6773940359` | id App Store Connect |
+| `TF_GROUP` | `Internal Testers` | groupe TestFlight (nom ou id) |
+| `TEST_NOTES` | `Version <v> (build <n>).` | note « What to Test » fr-FR |
+| `RELEASE_COMMIT` | `0` | `=1` → commit le bump sur la branche courante |
+
+Le bump de `project.yml` n'est **pas** commité par défaut (mettre
+`RELEASE_COMMIT=1` pour l'automatiser). Le flux manuel détaillé ci-dessous reste
+valable pour le débogage.
+
+## Flux complet manuel (release iOS)
 
 ```sh
 # 1. Bumper version + build dans project.yml, puis régénérer
