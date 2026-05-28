@@ -131,6 +131,7 @@ simulateur** (cf. « Build & vérification »).
 - Logs via `Logger` (os.log), subsystem `io.github.glandais.aether`, **pas de `print`**
 - Shaders Metal commentés en **anglais** ; code Swift commenté en **français** OK
 - Un commit logique par responsabilité, **jamais « WIP » ni « fixes »**
+- Branche d'intégration : **`develop`** (pas de `main`) — commits et PR ciblent `develop`
 
 ## Hors scope
 
