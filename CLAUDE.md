@@ -567,8 +567,77 @@ nuages**, et **world-locked** (suivent le regard/zoom comme le reste du ciel).
   Vérifié au simulateur (nuit Paris) : champ d'étoiles colorées au-dessus de
   l'horizon, scintillant ; occultées par une bande de nuage peinte ; absentes le jour.
 
+## Distribution App Store / TestFlight — **pipeline en place**
+
+L'app est distribuée via le CLI **`asc`** (auth par clé d'équipe dans le
+trousseau). Le pipeline build → upload → TestFlight est rodé ; la première
+release publique App Store reste à faire (métadonnées, captures, App Privacy).
+
+### Coordonnées App Store Connect
+
+- **App ID (ASC)** : `6773940359`
+- **Nom de fiche store** : « **Aether Painter** » (« Aether » seul est déjà pris
+  globalement sur l'App Store). Le nom d'écran d'accueil reste « Aether »
+  (`CFBundleDisplayName`), indépendant du nom de fiche.
+- **Bundle id** : `io.github.glandais.aether` · **UGS/SKU** : idem · **locale
+  primaire** : `fr-FR` · **équipe** : `7Q49262697`
+- Free, pas d'IAP, pas de collecte de données (localisation on-device seulement).
+- Catégorie store visée : **Graphics & Design**.
+
+### Réglages `project.yml` exigés par la distribution
+
+- `UIRequiresFullScreen: YES` — **obligatoire** : la cible est universelle
+  (iPhone+iPad) mais portrait-only ; sans ce flag, l'**ingestion App Store
+  échoue silencieusement** sur **ITMS-90474** (« apps iPad doivent supporter
+  toutes les orientations sauf si plein écran »). Le build n'apparaît alors
+  jamais sur TestFlight. Vérifier l'erreur via `asc builds uploads list`, pas
+  seulement `asc builds list` (qui reste vide en cas d'échec d'ingestion).
+- `ITSAppUsesNonExemptEncryption: NO` — évite la question de conformité export à
+  chaque build (chiffrement « exempt »).
+- `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` : bumper avant chaque archive ;
+  garder le numéro de build **monotone croissant** sur l'app entière.
+
+### Flux complet (release iOS)
+
+```sh
+# 1. Bumper version + build dans project.yml, puis régénérer
+xcodegen generate
+
+# 2. Archiver (signature auto, équipe 7Q49262697)
+xcodebuild clean archive -project Aether.xcodeproj -scheme Aether \
+  -configuration Release -archivePath build/Aether.xcarchive \
+  -destination 'generic/platform=iOS' -derivedDataPath build/dd \
+  -allowProvisioningUpdates
+
+# 3. Exporter l'IPA App Store (build/ExportOptions.plist : method app-store-connect)
+xcodebuild -exportArchive -archivePath build/Aether.xcarchive \
+  -exportPath build/AetherExport -exportOptionsPlist build/ExportOptions.plist \
+  -allowProvisioningUpdates
+
+# 4. Uploader puis vérifier que l'ingestion passe (≠ FAILED)
+asc builds upload --app 6773940359 --ipa build/AetherExport/Aether.ipa
+asc builds uploads list --app 6773940359 --output json   # state doit passer PROCESSING
+
+# 5. Attendre que le build soit VALID
+asc builds list --app 6773940359 --platform IOS --limit 5 --output table
+
+# 6. Publier sur le groupe interne TestFlight + note « What to Test » (fr-FR)
+asc builds add-groups --build-id <BUILD_ID> --group <GROUP_ID>
+asc builds test-notes create --build-id <BUILD_ID> --locale fr-FR --whats-new "…"
+# (si la note ressort vide, récupérer l'ID via test-notes list puis test-notes update)
+```
+
+Groupe interne TestFlight : « **Internal Testers** » (`isInternalGroup: true`,
+les builds internes sautent la beta review). Testeur :
+`gabriel.landais@gmail.com`.
+
 ## Reste à faire
 
+- **Release App Store publique** (TestFlight-first pour l'instant) : captures
+  d'écran (6,9″ iPhone obligatoire), métadonnées (description/mots-clés/
+  sous-titre), catégorie Graphics & Design, App Privacy « Données non
+  collectées », prix gratuit + bootstrap des territoires, puis soumission. Le
+  bloqueur d'orientation iPad (ITMS-90474) est déjà réglé. Skills `asc-*`.
 - **Réglages** (`Features/Settings`) : choisir le **lieu** (l'heure est déjà
   réglable au canvas ; manque la sélection géographique manuelle).
 - **Profilage perf sur device réel** : mer demi-rés confirmée à 60 ips
