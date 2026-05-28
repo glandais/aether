@@ -7,6 +7,20 @@ import simd
 /// occupent le plein cadre. L'utilisateur peint des silhouettes de nuages,
 /// éclairées selon le lieu/cadrage de la scène et l'heure choisie (le curseur
 /// déplace le soleil et la lune ; le nuage se rallume en conséquence).
+/// Sens du défilement automatique du temps (exclusif : un seul actif).
+private enum AutoPlay {
+    case none, forward, backward
+
+    /// Signe du sens (`0` si inactif) ; la vitesse est portée à part.
+    var direction: Double {
+        switch self {
+        case .none: 0
+        case .forward: 1
+        case .backward: -1
+        }
+    }
+}
+
 struct CanvasView: View {
     let context: SceneContext
 
@@ -26,6 +40,10 @@ struct CanvasView: View {
     @State private var showEphemeris = false
     /// Résolution « ici & maintenant » en cours (position GPS + fuseau).
     @State private var isResolvingHereNow = false
+    /// Défilement automatique du temps (aucun / avance / recul). Exclusif.
+    @State private var autoPlay: AutoPlay = .none
+    /// Multiplicateur de vitesse du défilement (1, 2, 4, 8, 16). 1× = 0,25 h/s.
+    @State private var autoPlaySpeed = 1
     /// Sous-menus repliés façon pinceau (révélés à la demande, pour un ciel
     /// dégagé) : édition (annuler/rétablir/effacer), ciel (soleil/lune/éphéméride),
     /// lieu. La date et l'heure restent affichées en base.
@@ -55,6 +73,11 @@ struct CanvasView: View {
     /// Plage de FOV au pincement (≈25°…100°).
     private static let minFieldOfView = 0.44
     private static let maxFieldOfView = 1.75
+
+    /// Vitesse de base du défilement automatique (heures par seconde réelle) au
+    /// multiplicateur 1×, et multiplicateurs disponibles (cycliques).
+    private static let baseHoursPerSecond = 0.25
+    private static let autoPlaySpeeds = [1, 2, 4, 8, 16]
 
     private let astro = SwiftAAAstroService()
     private let atmosphere = Atmosphere.earth
@@ -141,6 +164,31 @@ struct CanvasView: View {
         // Recalcul des étoiles hors `body` : seulement au changement de lieu/heure
         // (bucket ~60 s), pas à chaque frame de rotation/zoom.
         .task(id: starKey) { recomputeStars() }
+        // Défilement automatique : avance/recule l'heure en continu (≈30 ips) au
+        // rythme d'une heure par seconde réelle. `ContinuousClock` mesure le dt
+        // réel (lissage indépendant de la cadence) ; relancé/arrêté au changement
+        // d'état via `id:`.
+        .task(id: autoPlay) {
+            guard autoPlay != .none else { return }
+            let clock = ContinuousClock()
+            var last = clock.now
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(33))
+                if Task.isCancelled { break }
+                let now = clock.now
+                let elapsed = last.duration(to: now)
+                last = now
+                let elapsedSeconds = Double(elapsed.components.seconds)
+                    + Double(elapsed.components.attoseconds) * 1e-18
+                // Plafond : après une longue suspension (app en arrière-plan), on
+                // ne saute pas brutalement dans le temps.
+                let seconds = min(max(elapsedSeconds, 0), 0.5)
+                // Débit lu en direct : un changement de vitesse pendant le
+                // défilement s'applique sans relancer la boucle.
+                let rate = autoPlay.direction * Self.baseHoursPerSecond * Double(autoPlaySpeed)
+                advanceTime(byHours: rate * seconds)
+            }
+        }
         .sheet(isPresented: $showLocationPicker) {
             LocationPickerView(
                 initial: effectiveCoordinate, locationService: locationService
@@ -489,7 +537,9 @@ struct CanvasView: View {
         return "\(lat), \(lon)"
     }
 
-    /// Curseur d'heure : déplace le soleil/la lune, le nuage se rallume.
+    /// Curseur d'heure, encadré par deux bascules de défilement automatique
+    /// (recul / avance, mutuellement exclusives) : déplace le soleil/la lune, le
+    /// nuage se rallume.
     private func timeBar(isDaytime: Bool) -> some View {
         let hour = Binding(
             get: { currentHour },
@@ -499,8 +549,11 @@ struct CanvasView: View {
             Image(systemName: isDaytime ? "sun.max" : "moon.stars")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+            autoPlayButton(.backward, icon: "backward.fill", label: "time.rewind")
             Slider(value: hour, in: 0...24)
                 .tint(.white.opacity(0.55))
+            autoPlayButton(.forward, icon: "forward.fill", label: "time.advance")
+            speedButton
             Text(timeLabel)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
@@ -512,6 +565,53 @@ struct CanvasView: View {
         // Cape la largeur : en paysage le curseur resterait sinon collé aux bords.
         .frame(maxWidth: 520)
         .padding(.horizontal, 24)
+    }
+
+    /// Bascule de défilement automatique (recul ou avance). Réactiver le même
+    /// sens l'arrête ; activer l'autre bascule de sens (exclusion mutuelle).
+    private func autoPlayButton(
+        _ mode: AutoPlay, icon: String, label: String.LocalizationValue
+    ) -> some View {
+        Button {
+            autoPlay = (autoPlay == mode) ? .none : mode
+        } label: {
+            Image(systemName: icon)
+                .font(.footnote)
+                .foregroundStyle(autoPlay == mode ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(String(localized: label, table: "Aether")))
+    }
+
+    /// Règle la vitesse de défilement : cycle 1× → 2× → 4× → 8× → 16× → 1×.
+    private var speedButton: some View {
+        Button {
+            let speeds = Self.autoPlaySpeeds
+            let index = speeds.firstIndex(of: autoPlaySpeed) ?? 0
+            autoPlaySpeed = speeds[(index + 1) % speeds.count]
+        } label: {
+            Text(verbatim: "\(autoPlaySpeed)×")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(autoPlay == .none ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tint))
+                .frame(width: 30, alignment: .trailing)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(String(localized: "time.speed", table: "Aether")))
+        .accessibilityValue(Text(verbatim: "\(autoPlaySpeed)×"))
+    }
+
+    /// Avance (signe positif) ou recule l'heure courante de `hours`, en
+    /// franchissant minuit : tout multiple de 24 h décale le jour d'autant (le
+    /// jour est ancré à midi UTC, comme le sélecteur). Robuste à un `hours` > 24
+    /// (réveil après une longue veille).
+    private func advanceTime(byHours hours: Double) {
+        let baseDay = effectiveDay
+        let raw = currentHour + hours
+        let dayShift = (raw / 24).rounded(.down)
+        hourOverride = raw - dayShift * 24  // ramené dans [0, 24)
+        if dayShift != 0 {
+            dateOverride = baseDay.addingTimeInterval(dayShift * 86_400)
+        }
     }
 
     private var timeLabel: String {

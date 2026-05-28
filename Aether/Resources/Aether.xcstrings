@@ -636,6 +636,24 @@
         }
       }
     },
+    "time.advance" : {
+      "comment" : "Accessibilité : bascule d'avance automatique du temps.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auto-advance"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avance automatique"
+          }
+        }
+      }
+    },
     "time.date" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -649,6 +667,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Date"
+          }
+        }
+      }
+    },
+    "time.rewind" : {
+      "comment" : "Accessibilité : bascule de recul automatique du temps.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auto-rewind"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recul automatique"
+          }
+        }
+      }
+    },
+    "time.speed" : {
+      "comment" : "Accessibilité : bouton réglant la vitesse de défilement (1×…16×).",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Playback speed"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vitesse de défilement"
           }
         }
       }
