@@ -32,6 +32,9 @@ Package.resolved
 .AppleDouble
 .LSOverride
 
+# Claude Code worktrees (scratch, machine-local) — pas le reste de .claude/
+.claude/worktrees/
+
 # Misc
 *.hmap
 *.ipa
