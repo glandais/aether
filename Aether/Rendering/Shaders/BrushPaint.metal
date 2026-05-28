@@ -22,6 +22,7 @@ kernel void stamp_density_volume(texture3d<float, access::read> src [[texture(0)
                                  texture3d<float, access::write> dst [[texture(1)]],
                                  constant Dab *dabs [[buffer(0)]],
                                  constant uint &count [[buffer(1)]],
+                                 constant float &aspect [[buffer(2)]],
                                  uint3 gid [[thread_position_in_grid]]) {
     uint3 dims = uint3(dst.get_width(), dst.get_height(), dst.get_depth());
     if (any(gid >= dims)) {
@@ -39,7 +40,13 @@ kernel void stamp_density_volume(texture3d<float, access::read> src [[texture(0)
     float coverage = 0.0f;
     for (uint i = 0; i < count; ++i) {
         Dab d = dabs[i];
-        float dist = distance(canvas, d.center);
+        // Measure distance in a screen-proportional metric: the canvas U axis
+        // spans `aspect` (= drawable width/height) world units per V unit, so
+        // scaling the U delta makes `radius` (a V-axis fraction) project to a
+        // circle on screen regardless of orientation.
+        float2 delta = canvas - d.center;
+        delta.x *= aspect;
+        float dist = length(delta);
         float inner = d.radius * (1.0f - d.softness);
         float c = 1.0f - smoothstep(inner, d.radius, dist);
         coverage = max(coverage, c);

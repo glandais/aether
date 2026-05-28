@@ -43,9 +43,9 @@ targets:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_CFBundleDisplayName: Aether
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
-        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait"
-        # App portrait-only en plein écran → exempte de l'exigence d'orientations iPad
-        # (ITMS-90474) tout en conservant la cible universelle.
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        # Plein écran (pas de multitâche iPad) → exempte de l'exigence des quatre
+        # orientations iPad (ITMS-90474) tout en conservant la cible universelle.
         INFOPLIST_KEY_UIRequiresFullScreen: YES
         # Pas de chiffrement non exempté → évite la question de conformité export à chaque build.
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO

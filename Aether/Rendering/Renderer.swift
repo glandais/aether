@@ -192,6 +192,13 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     // Nombre de dabs déjà stampés dans le volume (repeinte incrémentale).
     private var stampedDabCount = 0
+    // Liste complète des dabs courants, conservée pour pouvoir repeindre tout le
+    // volume quand l'aspect change (rotation) — le pinceau reste alors circulaire.
+    private var dabs: [Dab] = []
+    // Aspect du dernier `draw` (largeur/hauteur du drawable) et aspect avec lequel
+    // le volume a été stampé ; un écart déclenche une repeinte intégrale.
+    private var lastAspect: Float = 1
+    private var stampedAspect: Float = 1
 
     init?(view: MTKView) {
         guard let device = view.device ?? MTLCreateSystemDefaultDevice(),
@@ -375,26 +382,30 @@ final class Renderer: NSObject, MTKViewDelegate {
     /// de façon incrémentale : seuls les dabs ajoutés depuis la dernière mise à
     /// jour sont stampés. Un trait qui s'allonge coûte O(nouveaux dabs).
     func updateStrokes(_ strokes: [BrushStroke]) {
-        var dabs: [Dab] = []
+        var built: [Dab] = []
         outer: for stroke in strokes {
             for point in stroke.points {
-                dabs.append(Dab(center: point, radius: stroke.radius, softness: stroke.softness))
-                if dabs.count >= Renderer.maxDabs {
+                built.append(Dab(center: point, radius: stroke.radius, softness: stroke.softness))
+                if built.count >= Renderer.maxDabs {
                     break outer
                 }
             }
         }
+        dabs = built
 
-        if dabs.count == stampedDabCount {
+        let aspectChanged = lastAspect != stampedAspect
+        if dabs.count == stampedDabCount && !aspectChanged {
             return  // rien de nouveau
         }
-        if dabs.count < stampedDabCount {
-            // Effacement / réinitialisation : on repart d'un volume vide.
+        if aspectChanged || dabs.count < stampedDabCount {
+            // Aspect changé (rotation) ou effacement : on repart d'un volume vide
+            // pour restamper tous les dabs au nouvel aspect (pinceau circulaire).
             clearVolume()
             stampedDabCount = 0
         }
+        stampedAspect = lastAspect
         if dabs.count > stampedDabCount {
-            stampDabs(Array(dabs[stampedDabCount..<dabs.count]))
+            stampDabs(Array(dabs[stampedDabCount..<dabs.count]), aspect: lastAspect)
             stampedDabCount = dabs.count
         }
     }
@@ -429,6 +440,16 @@ final class Renderer: NSObject, MTKViewDelegate {
         let historyTarget = cloudTargets[(frameIndex + 1) % 2]
 
         let aspect = Float(fullWidth) / Float(fullHeight)
+        lastAspect = aspect
+        // Rotation depuis le dernier stamp : repeindre tout le volume au nouvel
+        // aspect pour que le pinceau reste circulaire à l'écran (les traits ne
+        // changent pas, seul change le repère ; cf. `stamp_density_volume`).
+        if aspect != stampedAspect, !dabs.isEmpty {
+            clearVolume()
+            stampDabs(dabs, aspect: aspect)
+            stampedDabCount = dabs.count
+            stampedAspect = aspect
+        }
         let elapsed = Float(CACurrentMediaTime() - startTime)
         let volumeHalfHeight = Renderer.volumeDistance * cameraTanHalfFov
         var uniforms = CloudUniforms(
@@ -549,7 +570,7 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     /// Stampe les dabs fournis (max-combine avec l'existant) en ping-pong : lit
     /// le volume courant, écrit l'autre, puis bascule. Buffer neuf par appel.
-    private func stampDabs(_ dabs: [Dab]) {
+    private func stampDabs(_ dabs: [Dab], aspect: Float) {
         let count = min(dabs.count, Renderer.maxDabs)
         guard count > 0 else { return }
         let stride = MemoryLayout<Dab>.stride
@@ -567,11 +588,13 @@ final class Renderer: NSObject, MTKViewDelegate {
             return
         }
         var dabCount = UInt32(count)
+        var aspectValue = aspect
         encoder.setComputePipelineState(stampPipeline)
         encoder.setTexture(source, index: 0)
         encoder.setTexture(destination, index: 1)
         encoder.setBuffer(dabBuffer, offset: 0, index: 0)
         encoder.setBytes(&dabCount, length: MemoryLayout<UInt32>.stride, index: 1)
+        encoder.setBytes(&aspectValue, length: MemoryLayout<Float>.stride, index: 2)
         encoder.dispatchThreads(volumeGrid, threadsPerThreadgroup: volumeThreads)
         encoder.endEncoding()
         commandBuffer.commit()

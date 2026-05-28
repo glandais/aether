@@ -328,6 +328,8 @@ struct CanvasView: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
         .background(.ultraThinMaterial, in: Capsule())
+        // Cape la largeur : en paysage le curseur resterait sinon collé aux bords.
+        .frame(maxWidth: 520)
         .padding(.horizontal, 24)
     }
 
