@@ -126,6 +126,159 @@
         }
       }
     },
+    "ephemeris.alwaysDown" : {
+      "comment" : "Éphéméride : astre sous l'horizon tout le jour (nuit polaire).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Below the horizon" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Sous l’horizon" } }
+      }
+    },
+    "ephemeris.alwaysUp" : {
+      "comment" : "Éphéméride : astre au-dessus de l'horizon tout le jour (soleil de minuit).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Above the horizon" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Au-dessus de l’horizon" } }
+      }
+    },
+    "ephemeris.moon" : {
+      "comment" : "Éphéméride : nom de l'astre Lune (cas circumpolaire).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Moon" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Lune" } }
+      }
+    },
+    "ephemeris.sun" : {
+      "comment" : "Éphéméride : nom de l'astre Soleil (cas circumpolaire).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sun" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Soleil" } }
+      }
+    },
+    "ephemeris.illumination" : {
+      "comment" : "Éphéméride : libellé de la fraction éclairée de la Lune.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Illumination"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visibilité"
+          }
+        }
+      }
+    },
+    "ephemeris.moonrise" : {
+      "comment" : "Éphéméride : heure du lever de la Lune.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Moonrise"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lever de la lune"
+          }
+        }
+      }
+    },
+    "ephemeris.moonset" : {
+      "comment" : "Éphéméride : heure du coucher de la Lune.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Moonset"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Coucher de la lune"
+          }
+        }
+      }
+    },
+    "ephemeris.phase" : {
+      "comment" : "Éphéméride : libellé de la phase lunaire.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Phase"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Phase"
+          }
+        }
+      }
+    },
+    "ephemeris.sunrise" : {
+      "comment" : "Éphéméride : heure du lever du Soleil.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sunrise"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lever du soleil"
+          }
+        }
+      }
+    },
+    "ephemeris.sunset" : {
+      "comment" : "Éphéméride : heure du coucher du Soleil.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sunset"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Coucher du soleil"
+          }
+        }
+      }
+    },
+    "ephemeris.title" : {
+      "comment" : "Titre de la feuille d'éphéméride ; libellé du bouton.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ephemeris"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Éphéméride"
+          }
+        }
+      }
+    },
     "location.current" : {
       "comment" : "Accessibilité : bouton recentrant la carte sur la position actuelle.",
       "localizations" : {
@@ -209,6 +362,178 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Options"
+          }
+        }
+      }
+    },
+    "moon.firstQuarter" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "First quarter"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Premier quartier"
+          }
+        }
+      }
+    },
+    "moon.full" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Full moon"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pleine lune"
+          }
+        }
+      }
+    },
+    "moon.lastQuarter" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last quarter"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dernier quartier"
+          }
+        }
+      }
+    },
+    "moon.new" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "New moon"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nouvelle lune"
+          }
+        }
+      }
+    },
+    "moon.waningCrescent" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waning crescent"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dernier croissant"
+          }
+        }
+      }
+    },
+    "moon.waningGibbous" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waning gibbous"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gibbeuse décroissante"
+          }
+        }
+      }
+    },
+    "moon.waxingCrescent" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waxing crescent"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Premier croissant"
+          }
+        }
+      }
+    },
+    "moon.waxingGibbous" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waxing gibbous"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gibbeuse croissante"
+          }
+        }
+      }
+    },
+    "sky.centerMoon" : {
+      "comment" : "Accessibilité : bouton centrant le regard sur la Lune.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Center on the moon"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Centrer sur la lune"
+          }
+        }
+      }
+    },
+    "sky.centerSun" : {
+      "comment" : "Accessibilité : bouton centrant le regard sur le Soleil.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Center on the sun"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Centrer sur le soleil"
           }
         }
       }

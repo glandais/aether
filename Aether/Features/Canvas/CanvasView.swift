@@ -22,6 +22,8 @@ struct CanvasView: View {
     /// Fuseau résolu (tzf) pour le lieu choisi. `nil` = fuseau d'origine.
     @State private var timeZoneOverride: TimeZone?
     @State private var showLocationPicker = false
+    /// Feuille d'éphéméride (lever/coucher, phase) ouverte.
+    @State private var showEphemeris = false
     /// Résolution « ici & maintenant » en cours (position GPS + fuseau).
     @State private var isResolvingHereNow = false
     @State private var showBrushControls = false
@@ -93,6 +95,10 @@ struct CanvasView: View {
         /// reflet bon marché de la mer (dégradé, sans intégrale par pixel).
         var skyZenithRadiance: SIMD3<Float>
         var skyHorizonRadiance: SIMD3<Float>
+        /// Positions horizontales du Soleil et de la Lune (pour centrer le regard
+        /// et l'éphéméride). Réutilisées telles quelles, sans recalcul.
+        var sunPosition: CelestialPosition
+        var moonPosition: CelestialPosition
     }
 
     var body: some View {
@@ -106,6 +112,7 @@ struct CanvasView: View {
                     if model.canUndo || model.canRedo || !model.strokes.isEmpty {
                         editToolbar
                     }
+                    skyToolbar(sun: light.sunPosition, moon: light.moonPosition)
                     locationDateBar
                     timeBar(isDaytime: light.isDaytime)
                 }
@@ -138,6 +145,11 @@ struct CanvasView: View {
                 // d'heure, sans incidence sur le ciel).
                 Task { timeZoneOverride = await timeZoneService.timeZone(for: coordinate) }
             }
+        }
+        .sheet(isPresented: $showEphemeris) {
+            EphemerisView(
+                ephemeris: astro.ephemeris(at: effectiveCoordinate, date: effectiveDate),
+                timeZone: effectiveTimeZone)
         }
     }
 
@@ -331,7 +343,9 @@ struct CanvasView: View {
             moonGlint: moonLight.color * exposure,
             nightWeight: 1 - sunWeight,
             skyZenithRadiance: zenith,
-            skyHorizonRadiance: horizonRadiance)
+            skyHorizonRadiance: horizonRadiance,
+            sunPosition: sun,
+            moonPosition: moon)
     }
 
     /// FOV effectif : valeur pincée si présente, sinon celui de la scène.
@@ -602,6 +616,35 @@ struct CanvasView: View {
         .foregroundStyle(enabled ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
         .disabled(!enabled)
         .accessibilityLabel(Text(String(localized: labelKey, table: "Aether")))
+    }
+
+    /// Barre « ciel » : centrer le regard sur le Soleil ou la Lune (actif quand
+    /// l'astre est au-dessus de l'horizon), et ouvrir l'éphéméride.
+    private func skyToolbar(sun: CelestialPosition, moon: CelestialPosition) -> some View {
+        HStack(spacing: 24) {
+            editButton("sun.max", "sky.centerSun", enabled: sun.altitude > 0) {
+                center(on: sun)
+            }
+            editButton("moon.stars", "sky.centerMoon", enabled: moon.altitude > 0) {
+                center(on: moon)
+            }
+            editButton("info.circle", "ephemeris.title", enabled: true) {
+                showEphemeris = true
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial, in: Capsule())
+    }
+
+    /// Oriente le regard vers un astre : le cap/tangage de visée rejoignent son
+    /// azimut/altitude (le tangage est clampé par `CanvasModel`). Comme toute
+    /// reframe, on repart d'un ciel vierge.
+    private func center(on body: CelestialPosition) {
+        model.clearForCameraChange()
+        model.setRotation(
+            yaw: Float(body.azimuth - context.scene.heading),
+            pitch: Float(body.altitude - context.scene.pitch))
     }
 
     // MARK: - Météo
