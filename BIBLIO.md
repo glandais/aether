@@ -117,6 +117,20 @@ marching* pour l'auto-ombrage, Henyey-Greenstein, *powder effect*.
 
 - https://wallisc.github.io/rendering/2020/05/02/Volumetric-Rendering-Part-1.html
 
+### Mitchell — *Volumetric Light Scattering as a Post-Process* (GPU Gems 3, 2007)
+
+Rayons crépusculaires (« god rays ») « soleil derrière les nuages » en *post-
+process* écran : depuis chaque pixel, marche radiale vers la position écran du
+soleil en accumulant une source masquée par les occulteurs → les rayons jaillissent
+des trouées. Aether l'applique en demi-rés : source = lueur solaire × transmittance
+du nuage (alpha de la passe nuage), teintée par la couleur du disque solaire (nulle
+sous l'horizon → auto-éteinte la nuit), composée additivement —
+`Aether/Rendering/Shaders/GodRays.metal`.
+
+- Kenny Mitchell, « Volumetric Light Scattering as a Post-Process », *GPU Gems 3*,
+  ch. 13, Addison-Wesley, 2007 :
+  https://developer.nvidia.com/gpugems/gpugems3/part-ii-light-and-shadows/chapter-13-volumetric-light-scattering-post-process
+
 ---
 
 ## 3. Génération de bruit procédural (étape 3)

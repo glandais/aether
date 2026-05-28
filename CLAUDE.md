@@ -568,6 +568,38 @@ nuages**, et **world-locked** (suivent le regard/zoom comme le reste du ciel).
   Vérifié au simulateur (nuit Paris) : champ d'étoiles colorées au-dessus de
   l'horizon, scintillant ; occultées par une bande de nuage peinte ; absentes le jour.
 
+## God rays (rayons crépusculaires) — **terminé**
+
+Quand le soleil passe derrière un nuage, des **rayons crépusculaires** subtils
+jaillissent des trouées (registre sobre : doux, à peine perceptible). Technique :
+**diffusion de lumière en post-process écran** (Kenny Mitchell, *GPU Gems 3*
+ch. 13, cf. `BIBLIO.md`) — depuis chaque pixel, marche radiale vers la position
+écran du soleil en accumulant une source masquée par la couverture nuageuse. **Auto-
+régulé** : rien la nuit (couleur du soleil nulle sous l'horizon), rien sous couverture
+totale (source masquée), doux par ciel clair.
+
+- **`Rendering/Shaders/GodRays.metal`** : passe **demi-rés** (comme le ciel/nuage).
+  `god_rays_fragment` retrouve la position écran du soleil en **inversant** la
+  formule de rayon de `Background.metal` (mêmes `camRight/Up/Forward` + `tanHalfFov`/
+  aspect → alignement au pixel près avec le disque solaire), garde `dot(soleil,
+  forward) > 0` (soleil devant), puis marche (`kSamples = 48`) vers le soleil :
+  source = lueur solaire gaussienne (corrigée de l'aspect → cercle écran) ×
+  transmittance du nuage (`1 - alpha` de la passe nuage). Teinte par `sunDiscColor`
+  (nulle sous l'horizon → night-gate gratuit), échelle `intensity`. Une seule lecture
+  de texture par échantillon.
+- **Plomberie** (`Renderer`) : `GodRayUniforms` (apparié main Swift ↔ `.metal`),
+  cible `godRayTarget` (créée avec les cibles nuage/ciel), `godRaysPipeline`
+  (rendu demi-rés HDR) + `godRaysCompositePipeline` (réutilise `composite_fragment`,
+  blend **additif**). Passe 2.5 (après le ciel) écrit `godRayTarget` en lisant
+  l'alpha du nuage ; composé **en dernier** au passage composite (additif, par-
+  dessus tout — rayons diffusés dans l'air entre nuage et œil). Aucune dépendance
+  Feature nouvelle : `cameraRight/Up/Forward`, `cameraTanHalfFov`, `skySunDirection`,
+  `sunDiscColor` existaient déjà. Constantes de réglage (`godRayDensity/Decay/
+  Weight/Intensity`) sur `Renderer`, sobres par défaut.
+- Vérifié au simulateur (Plein midi / Sydney, nuage morcelé) : lumière chaude
+  jaillissant des trouées autour du soleil, alignée sur le disque ; nuit (02:00) →
+  aucun rayon (soleil sous l'horizon). 42 tests verts.
+
 ## Orientation paysage — **terminé**
 
 L'app tourne librement en **portrait + paysage** (gauche/droite). Le pipeline de

@@ -75,6 +75,18 @@ private struct StarUniforms {
     var params: SIMD4<Float>  // x: tan(FOV/2) ; y: aspect ; z: poids nocturne ; w: temps (s)
 }
 
+/// Uniforms du shader de god rays (rayons crépusculaires). Disposition
+/// **identique** à `GodRayUniforms` dans `GodRays.metal`.
+private struct GodRayUniforms {
+    var camRight: SIMD4<Float>
+    var camUp: SIMD4<Float>
+    var camForward: SIMD4<Float>
+    var camera: SIMD4<Float>        // x: tan(FOV/2) ; y: aspect
+    var sunDirection: SIMD4<Float>  // xyz: direction monde vers le soleil
+    var sunColor: SIMD4<Float>      // xyz: couleur du disque solaire (nulle sous l'horizon)
+    var params: SIMD4<Float>        // x: densité ; y: décroissance ; z: poids ; w: intensité
+}
+
 /// Rendu de l'étape 4 : le paysage en texture de fond, surmonté d'un nuage dont
 /// la forme provient d'un volume de densité 3D peint au pinceau. La sphère
 /// analytique des étapes 2-3 est remplacée par ce volume ; le bruit
@@ -86,6 +98,9 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let cloudPipeline: MTLRenderPipelineState
     private let compositePipeline: MTLRenderPipelineState
     private let starPipeline: MTLRenderPipelineState
+    // God rays : passe demi-rés (rayons crépusculaires) + composition additive.
+    private let godRaysPipeline: MTLRenderPipelineState
+    private let godRaysCompositePipeline: MTLRenderPipelineState
     private let stampPipeline: MTLComputePipelineState
     private let clearPipeline: MTLComputePipelineState
     // Paysage : placeholder au départ, remplacé par la Feature (galerie curée)
@@ -109,6 +124,9 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var cloudTargetHeight = 0
     // Ciel + mer rendus hors écran à demi-résolution (HDR), upsamplés au composite.
     private var skyTarget: MTLTexture?
+    // God rays (rayons crépusculaires) rendus hors écran à demi-rés, composés
+    // additivement par-dessus tout au passage composite.
+    private var godRayTarget: MTLTexture?
     private var frameIndex = 0
     // Ordre de Bayer 2×2 : répartit les 4 cellules sur 4 frames.
     private static let activeOrder: [UInt32] = [0, 3, 1, 2]
@@ -137,6 +155,14 @@ final class Renderer: NSObject, MTKViewDelegate {
     // légèrement agrandis (~2×) pour une présence lisible. Constants avec l'heure.
     private static let sunAngularRadius: Float = 0.009
     private static let moonAngularRadius: Float = 0.009
+
+    // God rays (rayons crépusculaires) — registre sobre : effet subtil, à doser.
+    // `density` = portée de la marche radiale vers le soleil ; `decay` = perte par
+    // pas ; `weight` = contribution par échantillon ; `intensity` = échelle finale.
+    private static let godRayDensity: Float = 0.6
+    private static let godRayDecay: Float = 0.96
+    private static let godRayWeight: Float = 0.04
+    private static let godRayIntensity: Float = 0.5
 
     // Paramètres météo (étape 9), résolus par la Feature depuis la météo
     // statique du paysage curé. Neutres avant la première mise à jour.
@@ -218,6 +244,8 @@ final class Renderer: NSObject, MTKViewDelegate {
               let compositeFragment = library.makeFunction(name: "composite_fragment"),
               let starVertex = library.makeFunction(name: "star_vertex"),
               let starFragment = library.makeFunction(name: "star_fragment"),
+              let godRaysVertex = library.makeFunction(name: "god_rays_vertex"),
+              let godRaysFragment = library.makeFunction(name: "god_rays_fragment"),
               let stampFunction = library.makeFunction(name: "stamp_density_volume"),
               let clearFunction = library.makeFunction(name: "clear_density_volume") else {
             return nil
@@ -244,6 +272,14 @@ final class Renderer: NSObject, MTKViewDelegate {
             // Étoiles : points additifs composés sur le ciel, sous le nuage.
             starPipeline = try Renderer.makePipeline(
                 device: device, vertex: starVertex, fragment: starFragment,
+                pixelFormat: format, blend: .additive)
+            // God rays : passe demi-rés HDR (sans blending, comme le ciel)…
+            godRaysPipeline = try Renderer.makePipeline(
+                device: device, vertex: godRaysVertex, fragment: godRaysFragment,
+                pixelFormat: Renderer.cloudColorFormat, blend: .none)
+            // …puis composition additive plein écran (réutilise `composite_fragment`).
+            godRaysCompositePipeline = try Renderer.makePipeline(
+                device: device, vertex: compositeVertex, fragment: compositeFragment,
                 pixelFormat: format, blend: .additive)
             stampPipeline = try device.makeComputePipelineState(function: stampFunction)
             clearPipeline = try device.makeComputePipelineState(function: clearFunction)
@@ -430,6 +466,7 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         guard cloudTargets.count == 2,
               let skyTarget = skyTarget,
+              let godRayTarget = godRayTarget,
               let descriptor = view.currentRenderPassDescriptor,
               let drawable = view.currentDrawable,
               let commandBuffer = commandQueue.makeCommandBuffer() else {
@@ -529,6 +566,37 @@ final class Renderer: NSObject, MTKViewDelegate {
         skyEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         skyEncoder.endEncoding()
 
+        // Passe 2.5 — god rays (rayons crépusculaires) hors écran à demi-rés :
+        // marche radiale de chaque pixel vers la position écran du soleil, source
+        // = lueur solaire × transmittance du nuage (alpha de la passe nuage). Le
+        // disque solaire (passe ciel) et le nuage suivent déjà le regard ; on
+        // réutilise la même base caméra / FOV / aspect. Auto-éteinte la nuit
+        // (couleur du soleil nulle sous l'horizon) et sous couverture totale.
+        var godRayUniforms = GodRayUniforms(
+            camRight: SIMD4(cameraRight.x, cameraRight.y, cameraRight.z, 0.0),
+            camUp: SIMD4(cameraUp.x, cameraUp.y, cameraUp.z, 0.0),
+            camForward: SIMD4(cameraForward.x, cameraForward.y, cameraForward.z, 0.0),
+            camera: SIMD4(cameraTanHalfFov, aspect, 0.0, 0.0),
+            sunDirection: SIMD4(skySunDirection.x, skySunDirection.y, skySunDirection.z, 0.0),
+            sunColor: SIMD4(sunDiscColor.x, sunDiscColor.y, sunDiscColor.z, 0.0),
+            params: SIMD4(
+                Renderer.godRayDensity, Renderer.godRayDecay,
+                Renderer.godRayWeight, Renderer.godRayIntensity))
+
+        let godRayPass = MTLRenderPassDescriptor()
+        godRayPass.colorAttachments[0].texture = godRayTarget
+        godRayPass.colorAttachments[0].loadAction = .dontCare
+        godRayPass.colorAttachments[0].storeAction = .store
+        guard let godRayEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: godRayPass) else {
+            return
+        }
+        godRayEncoder.setRenderPipelineState(godRaysPipeline)
+        godRayEncoder.setFragmentBytes(
+            &godRayUniforms, length: MemoryLayout<GodRayUniforms>.stride, index: 0)
+        godRayEncoder.setFragmentTexture(writeTarget, index: 0)
+        godRayEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        godRayEncoder.endEncoding()
+
         // Passe 3 — composition plein écran : ciel+mer puis nuage, tous deux
         // demi-rés upsamplés (bilinéaire) et composés « over » prémultiplié.
         guard let compositeEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
@@ -558,6 +626,14 @@ final class Renderer: NSObject, MTKViewDelegate {
         // composite et la texture nuage après le draw des points.
         compositeEncoder.setRenderPipelineState(compositePipeline)
         compositeEncoder.setFragmentTexture(writeTarget, index: 0)
+        compositeEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+
+        // God rays composés **en dernier**, additivement par-dessus tout : ce
+        // sont des rayons diffusés dans l'air entre le nuage et l'œil, donc en
+        // surimpression. La source étant masquée par la couverture, un nuage
+        // épais juste devant le soleil ne produit aucun rayon à cet endroit.
+        compositeEncoder.setRenderPipelineState(godRaysCompositePipeline)
+        compositeEncoder.setFragmentTexture(godRayTarget, index: 0)
         compositeEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         compositeEncoder.endEncoding()
 
@@ -651,6 +727,8 @@ final class Renderer: NSObject, MTKViewDelegate {
         // Cible du ciel+mer (demi-rés, HDR), recréée avec les cibles nuage.
         descriptor.usage = [.renderTarget, .shaderRead]
         skyTarget = device.makeTexture(descriptor: descriptor)
+        // Cible des god rays (demi-rés, HDR), même format que le ciel.
+        godRayTarget = device.makeTexture(descriptor: descriptor)
     }
 
     private func clear(_ texture: MTLTexture) {
