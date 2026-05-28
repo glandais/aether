@@ -13,6 +13,9 @@ struct CanvasView: View {
     @State private var model = CanvasModel()
     /// Heure locale choisie (heures, 0…24). `nil` = heure d'origine de la scène.
     @State private var hourOverride: Double?
+    /// Jour choisi. `nil` = date d'origine de la scène. Déplace soleil, lune et
+    /// étoiles (saison, phase lunaire) sans toucher au cadrage.
+    @State private var dateOverride: Date?
     @State private var showBrushControls = false
     /// Révèle toutes les options (retour, regard, pinceau, heure). Replié par
     /// défaut : seule la bascule « Options » est visible, pour un ciel dégagé.
@@ -93,6 +96,7 @@ struct CanvasView: View {
                     if model.canUndo || model.canRedo || !model.strokes.isEmpty {
                         editToolbar
                     }
+                    dateBar
                     timeBar(isDaytime: light.isDaytime)
                 }
                 .padding(.bottom, 28)
@@ -175,9 +179,7 @@ struct CanvasView: View {
 
     // MARK: - Heure & éclairage
 
-    private var sceneTimeZone: TimeZone {
-        TimeZone(secondsFromGMT: Int(context.scene.utcOffset)) ?? .gmt
-    }
+    private var sceneTimeZone: TimeZone { context.scene.timeZone }
 
     /// Heure locale d'origine de la scène (heures décimales).
     private var initialHour: Double {
@@ -189,12 +191,46 @@ struct CanvasView: View {
 
     private var currentHour: Double { hourOverride ?? initialHour }
 
-    /// Instant effectif = jour de la scène, à l'heure locale choisie.
+    /// Jour montré par le sélecteur : **midi UTC** du jour choisi (ou, à défaut,
+    /// du jour local de la scène). Le sélecteur travaille en UTC sur cette valeur
+    /// ancrée à midi : aucun risque de bascule de jour près de minuit, ni de
+    /// désync calendrier/champ dû au fuseau fractionnaire de la scène.
+    private var effectiveDay: Date { dateOverride ?? defaultDay }
+
+    /// Jour local d'origine de la scène, ramené à midi UTC pour le sélecteur.
+    private var defaultDay: Date {
+        var sceneCalendar = Calendar(identifier: .gregorian)
+        sceneCalendar.timeZone = sceneTimeZone
+        let day = sceneCalendar.dateComponents([.year, .month, .day], from: context.scene.date)
+        return Self.noonUTC(day) ?? context.scene.date
+    }
+
+    /// Instant effectif = jour choisi (an/mois/jour lus en UTC) à l'heure locale
+    /// choisie, placé dans le fuseau de la scène.
     private var effectiveDate: Date {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = sceneTimeZone
-        let startOfDay = calendar.startOfDay(for: context.scene.date)
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = .gmt
+        let day = utc.dateComponents([.year, .month, .day], from: effectiveDay)
+        var sceneCalendar = Calendar(identifier: .gregorian)
+        sceneCalendar.timeZone = sceneTimeZone
+        var startComponents = DateComponents()
+        startComponents.year = day.year
+        startComponents.month = day.month
+        startComponents.day = day.day
+        let startOfDay = sceneCalendar.date(from: startComponents) ?? effectiveDay
         return startOfDay.addingTimeInterval(currentHour * 3600)
+    }
+
+    /// Midi UTC du jour donné (an/mois/jour), point d'ancrage stable du sélecteur.
+    private static func noonUTC(_ day: DateComponents) -> Date? {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = .gmt
+        var noon = DateComponents()
+        noon.year = day.year
+        noon.month = day.month
+        noon.day = day.day
+        noon.hour = 12
+        return utc.date(from: noon)
     }
 
     /// Soleil le jour, lune la nuit (fondu au crépuscule), calé sur l'exposition.
@@ -334,6 +370,31 @@ struct CanvasView: View {
         } else {
             metalView.ignoresSafeArea()
         }
+    }
+
+    /// Sélecteur de date : déplace le jour de la scène (saison, phase lunaire,
+    /// ciel étoilé), l'heure et le cadrage restant inchangés.
+    private var dateBar: some View {
+        let day = Binding(
+            get: { effectiveDay },
+            set: { dateOverride = $0 }
+        )
+        return HStack(spacing: 12) {
+            Image(systemName: "calendar")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            DatePicker("", selection: day, displayedComponents: .date)
+                .labelsHidden()
+                .environment(\.timeZone, .gmt)
+                .environment(\.calendar, Calendar(identifier: .gregorian))
+                .accessibilityLabel(Text(String(localized: "time.date", table: "Aether")))
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: Capsule())
+        .frame(maxWidth: 520)
+        .padding(.horizontal, 24)
     }
 
     /// Curseur d'heure : déplace le soleil/la lune, le nuage se rallume.

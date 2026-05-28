@@ -9,6 +9,8 @@ struct CuratedLandscape: Identifiable {
     let palette: LandscapeFactory.Palette
     let coordinate: GeoCoordinate
     let date: Date
+    /// Fuseau IANA du lieu (`Europe/Paris`…), pour l'heure locale exacte (DST).
+    let timeZoneIdentifier: String
     /// Météo figée du paysage (plus de récupération réseau) : informe la
     /// couverture et l'opacité initiales du nuage peint.
     let weather: WeatherSnapshot
@@ -19,7 +21,7 @@ struct CuratedLandscape: Identifiable {
         guard let image = LandscapeFactory.image(palette: palette) else { return nil }
         let scene = Scene(
             title: title, coordinate: coordinate, date: date,
-            utcOffset: coordinate.longitude / 15.0 * 3600.0)  // approx. via longitude
+            timeZoneIdentifier: timeZoneIdentifier)
         // Paysages curés abstraits : plein cadre (displayAspect nil).
         return SceneContext(
             scene: scene, landscape: image, displayAspect: nil,
@@ -39,6 +41,7 @@ extension CuratedLandscape {
                 skyLow: rgb(0.46, 0.33, 0.40), skyHigh: rgb(0.10, 0.13, 0.25)),
             coordinate: GeoCoordinate(latitude: 48.8566, longitude: 2.3522),  // Paris
             date: utc(2026, 5, 25, 19, 15),
+            timeZoneIdentifier: "Europe/Paris",
             weather: WeatherSnapshot(
                 condition: .partlyCloudy, cloudCover: 0.45, humidity: 0.65,
                 windSpeed: 3, temperature: 16),
@@ -50,6 +53,7 @@ extension CuratedLandscape {
                 skyLow: rgb(0.62, 0.66, 0.78), skyHigh: rgb(0.30, 0.45, 0.66)),
             coordinate: GeoCoordinate(latitude: 35.0116, longitude: 135.7681),  // Kyoto
             date: utc(2026, 5, 25, 20, 0),
+            timeZoneIdentifier: "Asia/Tokyo",
             weather: WeatherSnapshot(
                 condition: .clear, cloudCover: 0.20, humidity: 0.55,
                 windSpeed: 2, temperature: 14),
@@ -61,6 +65,7 @@ extension CuratedLandscape {
                 skyLow: rgb(0.20, 0.26, 0.46), skyHigh: rgb(0.06, 0.09, 0.22)),
             coordinate: GeoCoordinate(latitude: 64.1466, longitude: -21.9426),  // Reykjavik
             date: utc(2026, 5, 25, 22, 30),
+            timeZoneIdentifier: "Atlantic/Reykjavik",
             weather: WeatherSnapshot(
                 condition: .overcast, cloudCover: 0.85, humidity: 0.80,
                 windSpeed: 8, temperature: 7),
@@ -72,6 +77,7 @@ extension CuratedLandscape {
                 skyLow: rgb(0.46, 0.62, 0.82), skyHigh: rgb(0.20, 0.42, 0.74)),
             coordinate: GeoCoordinate(latitude: -33.8688, longitude: 151.2093),  // Sydney
             date: utc(2026, 5, 25, 2, 0),
+            timeZoneIdentifier: "Australia/Sydney",
             weather: WeatherSnapshot(
                 condition: .partlyCloudy, cloudCover: 0.30, humidity: 0.45,
                 windSpeed: 5, temperature: 24),

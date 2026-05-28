@@ -21,12 +21,25 @@ struct Scene: Identifiable, Equatable, Sendable {
     /// Roulis de la caméra : radians, inclinaison latérale résiduelle (après
     /// redressement EXIF). Reconstruit depuis l'`AccelerationVector`.
     var roll: Double
-    /// Décalage UTC du lieu (secondes) : pour afficher/scruter l'heure locale.
-    /// EXIF `OffsetTimeOriginal` pour les photos, approx. longitude sinon.
+    /// Décalage UTC du lieu (secondes) : repli pour afficher/scruter l'heure
+    /// locale quand aucun fuseau nommé n'est connu (EXIF `OffsetTimeOriginal`).
     var utcOffset: TimeInterval
+    /// Identifiant IANA du fuseau du lieu (`Europe/Paris`…) : préféré à
+    /// `utcOffset`, il porte l'heure d'été via la tzdata système. `nil` pour les
+    /// photos importées (on retombe alors sur `utcOffset`).
+    var timeZoneIdentifier: String?
 
     /// FOV vertical par défaut ≈ 53° (caméra grand-angle générique).
     static let defaultFieldOfView = 0.9273
+
+    /// Fuseau résolu : tzdata système si un identifiant nommé est connu (DST
+    /// inclus), sinon offset fixe `utcOffset`.
+    var timeZone: TimeZone {
+        if let timeZoneIdentifier, let zone = TimeZone(identifier: timeZoneIdentifier) {
+            return zone
+        }
+        return TimeZone(secondsFromGMT: Int(utcOffset)) ?? .gmt
+    }
 
     init(
         id: UUID = UUID(),
@@ -38,7 +51,8 @@ struct Scene: Identifiable, Equatable, Sendable {
         fieldOfView: Double = Scene.defaultFieldOfView,
         pitch: Double = 0,
         roll: Double = 0,
-        utcOffset: TimeInterval = 0
+        utcOffset: TimeInterval = 0,
+        timeZoneIdentifier: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -50,5 +64,6 @@ struct Scene: Identifiable, Equatable, Sendable {
         self.pitch = pitch
         self.roll = roll
         self.utcOffset = utcOffset
+        self.timeZoneIdentifier = timeZoneIdentifier
     }
 }
