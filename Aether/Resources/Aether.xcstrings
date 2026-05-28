@@ -1,96 +1,130 @@
 {
-  "sourceLanguage" : "fr",
-  "strings" : {
-    "action.clear" : {
-      "comment" : "Bouton effaçant tous les nuages peints.",
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Clear"
+  "sourceLanguage": "fr",
+  "strings": {
+    "action.back": {
+      "extractionState": "stale",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back"
           }
         },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Effacer"
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retour"
           }
         }
       }
     },
-    "action.redo" : {
-      "comment" : "Accessibilité : bouton rétablir le trait annulé.",
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Redo"
+    "action.clear": {
+      "comment": "Bouton effaçant tous les nuages peints.",
+      "extractionState": "stale",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear"
           }
         },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Rétablir"
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Effacer"
           }
         }
       }
     },
-    "action.undo" : {
-      "comment" : "Accessibilité : bouton annuler le dernier trait.",
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Undo"
+    "action.redo": {
+      "comment": "Accessibilité : bouton rétablir le trait annulé.",
+      "extractionState": "stale",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Redo"
           }
         },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Annuler"
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rétablir"
           }
         }
       }
     },
-    "app.tagline" : {
-      "comment" : "Sous-titre atmosphérique, registre sobre. Non encore affiché.",
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Paint the sky."
+    "action.undo": {
+      "comment": "Accessibilité : bouton annuler le dernier trait.",
+      "extractionState": "stale",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Undo"
           }
         },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Peignez le ciel."
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Annuler"
           }
         }
       }
     },
-    "mode.lookAround" : {
-      "comment" : "Accessibilité : bouton activant la rotation du regard.",
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Look around"
+    "app.tagline": {
+      "comment": "Sous-titre atmosphérique, registre sobre. Non encore affiché.",
+      "extractionState": "stale",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paint the sky."
           }
         },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Pivoter la vue"
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Peignez le ciel."
+          }
+        }
+      }
+    },
+    "mode.lookAround": {
+      "comment": "Accessibilité : bouton activant la rotation du regard.",
+      "extractionState": "stale",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Look around"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pivoter la vue"
+          }
+        }
+      }
+    },
+    "mode.options": {
+      "extractionState": "stale",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Options"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Options"
           }
         }
       }
     }
   },
-  "version" : "1.0"
+  "version": "1.0"
 }
