@@ -308,14 +308,19 @@ static float3 seaShade(float3 p, float3 n, float3 eye, float3 sunDir,
     // Moonlight: a cool moonglade (specular streak broadened by the waves) plus
     // a faint sheen on water facing the moon. Night-gated and scaled by the
     // moonlight colour, so it survives the ground-light dimming above and only
-    // appears once the moon is up at night.
+    // appears once the moon is up at night. A broad lobe (low exponent) spreads
+    // the glade into a soft column instead of pinpoint sparkles, and the streak
+    // intensity is soft-knee compressed so bright crests roll off toward the
+    // cool moon colour rather than clipping to harsh white.
     const float3 moonDir = normalize(sky.moonDirection.xyz);
     const float nightW = sky.moonDirection.w;
     if (sky.moonDirection.y > 0.0 && nightW > 0.0) {
         const float3 moonColor = sky.moonGlint.xyz;
-        const float glade = seaSpecular(n, moonDir, eye, 300.0);
-        const float sheen = seaDiffuse(n, moonDir, 40.0) * fresnel * 0.15;
-        color += moonColor * (glade + sheen) * nightW;
+        const float glade = seaSpecular(n, moonDir, eye, 90.0);
+        const float sheen = seaDiffuse(n, moonDir, 40.0) * fresnel * 0.18;
+        float intensity = (glade * 0.3 + sheen) * nightW;
+        intensity = intensity / (1.0 + intensity);   // soft knee: rolls off to 1
+        color += moonColor * intensity;
     }
 
     return color;
