@@ -14,6 +14,9 @@ struct CanvasView: View {
     /// Heure locale choisie (heures, 0…24). `nil` = heure d'origine de la scène.
     @State private var hourOverride: Double?
     @State private var showBrushControls = false
+    /// Révèle toutes les options (retour, regard, pinceau, heure). Replié par
+    /// défaut : seule la bascule « Options » est visible, pour un ciel dégagé.
+    @State private var showOptions = false
     /// Orientation du regard au début d'un drag de rotation (lacet, tangage).
     @State private var rotationAnchor: SIMD2<Float>?
     /// Champ de vision choisi (radians). `nil` = FOV d'origine de la scène.
@@ -84,19 +87,27 @@ struct CanvasView: View {
         return ZStack {
             Color.black.ignoresSafeArea()
             canvas(light: light)
-            VStack(spacing: 14) {
-                Spacer()
-                if model.canUndo || model.canRedo || !model.strokes.isEmpty {
-                    editToolbar
+            if showOptions {
+                VStack(spacing: 14) {
+                    Spacer()
+                    if model.canUndo || model.canRedo || !model.strokes.isEmpty {
+                        editToolbar
+                    }
+                    timeBar(isDaytime: light.isDaytime)
                 }
-                timeBar(isDaytime: light.isDaytime)
+                .padding(.bottom, 28)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
-            .padding(.bottom, 28)
         }
         .overlay(alignment: .topTrailing) {
             VStack(alignment: .trailing, spacing: 10) {
-                rotateButton
-                brushControls
+                optionsButton
+                if showOptions {
+                    rotateButton
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    brushControls
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
             .padding(.trailing, 16).padding(.top, 8)
         }
@@ -128,6 +139,23 @@ struct CanvasView: View {
         starField = StarCatalog.visibleStars(
             Self.starCatalog, latitude: coordinate.latitude, siderealTime: sidereal)
         starRevision += 1
+    }
+
+    /// Bascule unique « Options » : repliée par défaut pour garder le ciel
+    /// dégagé, elle révèle d'un geste l'ensemble des réglages (retour, regard,
+    /// pinceau, heure).
+    private var optionsButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { showOptions.toggle() }
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.headline)
+                .foregroundStyle(showOptions ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                .padding(12)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(String(localized: "mode.options", table: "Aether")))
     }
 
     /// Bascule le mode rotation du regard (jumeau du bouton pinceau).
