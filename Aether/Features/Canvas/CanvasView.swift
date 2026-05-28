@@ -26,6 +26,12 @@ struct CanvasView: View {
     @State private var showEphemeris = false
     /// Résolution « ici & maintenant » en cours (position GPS + fuseau).
     @State private var isResolvingHereNow = false
+    /// Sous-menus repliés façon pinceau (révélés à la demande, pour un ciel
+    /// dégagé) : édition (annuler/rétablir/effacer), ciel (soleil/lune/éphéméride),
+    /// lieu. La date et l'heure restent affichées en base.
+    @State private var showEditControls = false
+    @State private var showSkyControls = false
+    @State private var showPositionControls = false
     @State private var showBrushControls = false
     /// Révèle toutes les options (retour, regard, pinceau, heure). Replié par
     /// défaut : seule la bascule « Options » est visible, pour un ciel dégagé.
@@ -109,11 +115,6 @@ struct CanvasView: View {
             if showOptions {
                 VStack(spacing: 14) {
                     Spacer()
-                    if model.canUndo || model.canRedo || !model.strokes.isEmpty {
-                        editToolbar
-                    }
-                    skyToolbar(sun: light.sunPosition, moon: light.moonPosition)
-                    locationDateBar
                     timeBar(isDaytime: light.isDaytime)
                 }
                 .padding(.bottom, 28)
@@ -124,10 +125,15 @@ struct CanvasView: View {
             VStack(alignment: .trailing, spacing: 10) {
                 optionsButton
                 if showOptions {
-                    rotateButton
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                    brushControls
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    let reveal = AnyTransition.opacity.combined(with: .move(edge: .top))
+                    rotateButton.transition(reveal)
+                    if hasEdits {
+                        editControls.transition(reveal)
+                    }
+                    skyControls(sun: light.sunPosition, moon: light.moonPosition)
+                        .transition(reveal)
+                    positionControls.transition(reveal)
+                    brushControls.transition(reveal)
                 }
             }
             .padding(.trailing, 16).padding(.top, 8)
@@ -185,11 +191,7 @@ struct CanvasView: View {
         Button {
             withAnimation(.easeInOut(duration: 0.2)) { showOptions.toggle() }
         } label: {
-            Image(systemName: "slider.horizontal.3")
-                .font(.headline)
-                .foregroundStyle(showOptions ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
-                .padding(12)
-                .background(.ultraThinMaterial, in: Circle())
+            bubbleLabel("slider.horizontal.3", active: showOptions)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(String(localized: "mode.options", table: "Aether")))
@@ -200,11 +202,7 @@ struct CanvasView: View {
         Button {
             withAnimation(.easeInOut(duration: 0.2)) { model.isRotating.toggle() }
         } label: {
-            Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
-                .font(.headline)
-                .foregroundStyle(model.isRotating ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
-                .padding(12)
-                .background(.ultraThinMaterial, in: Circle())
+            bubbleLabel("arrow.up.and.down.and.arrow.left.and.right", active: model.isRotating)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(String(localized: "mode.lookAround", table: "Aether")))
@@ -413,36 +411,16 @@ struct CanvasView: View {
         }
     }
 
-    /// Lieu + date compactés sur une ligne, précédés du bouton « ici &
-    /// maintenant ». Le lieu ouvre la carte ; la date déplace le jour (saison,
-    /// phase lunaire, ciel étoilé), heure et cadrage inchangés.
-    private var locationDateBar: some View {
+    /// Sous-menu « lieu » : coordonnée courante, ouverture de la carte, date du
+    /// jour (saison, phase lunaire, ciel étoilé), et « ici & maintenant » (recale
+    /// lieu, jour et heure sur l'instant courant).
+    private var positionPanel: some View {
         let day = Binding(
             get: { effectiveDay },
             set: { dateOverride = $0 }
         )
-        return HStack(spacing: 10) {
-            hereNowButton
+        return VStack(alignment: .trailing, spacing: 14) {
             HStack(spacing: 10) {
-                Button {
-                    showLocationPicker = true
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "globe")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        Text(locationLabel)
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                    }
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(Text(String(localized: "location.title", table: "Aether")))
-
-                Divider().frame(height: 18)
-
                 Image(systemName: "calendar")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -451,35 +429,33 @@ struct CanvasView: View {
                     .environment(\.timeZone, .gmt)
                     .environment(\.calendar, Calendar(identifier: .gregorian))
                     .accessibilityLabel(Text(String(localized: "time.date", table: "Aether")))
-                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 8)
-            .background(.ultraThinMaterial, in: Capsule())
-        }
-        .frame(maxWidth: 560)
-        .padding(.horizontal, 24)
-    }
 
-    /// « Ici & maintenant » : recale lieu (GPS), jour et heure sur l'instant
-    /// courant de l'utilisateur.
-    private var hereNowButton: some View {
-        Button(action: resetToHereAndNow) {
-            Group {
-                if isResolvingHereNow {
-                    ProgressView()
-                } else {
-                    Image(systemName: "scope")
+            Text(locationLabel)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+
+            HStack(spacing: 22) {
+                editButton("map", "location.title", enabled: true) {
+                    showLocationPicker = true
                 }
+                Button(action: resetToHereAndNow) {
+                    Group {
+                        if isResolvingHereNow {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "scope").font(.body)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.primary)
+                .disabled(isResolvingHereNow)
+                .accessibilityLabel(Text(String(localized: "location.hereNow", table: "Aether")))
             }
-            .font(.headline)
-            .foregroundStyle(.tint)
-            .frame(width: 44, height: 44)
-            .background(.ultraThinMaterial, in: Circle())
         }
-        .buttonStyle(.plain)
-        .disabled(isResolvingHereNow)
-        .accessibilityLabel(Text(String(localized: "location.hereNow", table: "Aether")))
     }
 
     /// Recale lieu (position GPS), jour et heure sur l'instant courant. Échec
@@ -546,35 +522,89 @@ struct CanvasView: View {
         return formatter.string(from: effectiveDate)
     }
 
-    /// Réglages du pinceau (rayon, adoucissement), révélés par un bouton sobre.
-    /// Affectent les prochains traits peints.
-    private var brushControls: some View {
+    /// Y a-t-il quelque chose à éditer (trait en cours ou historique) ? Conditionne
+    /// l'apparition du sous-menu d'édition.
+    private var hasEdits: Bool {
+        model.canUndo || model.canRedo || !model.strokes.isEmpty
+    }
+
+    /// Bouton-bascule façon pinceau : révèle un panneau aligné à droite,
+    /// `.ultraThinMaterial`, sous un bouton circulaire (teinté quand ouvert).
+    /// Pastille circulaire de taille **uniforme** quelle que soit la largeur du
+    /// symbole (sinon les cercles diffèrent et s'alignent mal). Teintée si active.
+    private func bubbleLabel(_ systemName: String, active: Bool) -> some View {
+        Image(systemName: systemName)
+            .resizable()
+            .scaledToFit()
+            .frame(width: 18, height: 18)
+            .foregroundStyle(active ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+            .padding(13)
+            .background(.ultraThinMaterial, in: Circle())
+    }
+
+    private func revealGroup<Content: View>(
+        isOn: Binding<Bool>, icon: String, label: String.LocalizationValue,
+        @ViewBuilder panel: () -> Content
+    ) -> some View {
         VStack(alignment: .trailing, spacing: 10) {
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) { showBrushControls.toggle() }
+                withAnimation(.easeInOut(duration: 0.2)) { isOn.wrappedValue.toggle() }
             } label: {
-                Image(systemName: "paintbrush.pointed")
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                    .padding(12)
-                    .background(.ultraThinMaterial, in: Circle())
+                bubbleLabel(icon, active: isOn.wrappedValue)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(Text(String(localized: label, table: "Aether")))
 
-            if showBrushControls {
-                VStack(spacing: 14) {
-                    brushSlider(
-                        icon: "smallcircle.filled.circle",
-                        value: binding(\.brushRadius), range: 0.03...0.25)
-                    brushSlider(
-                        icon: "drop",
-                        value: binding(\.brushSoftness), range: 0...1)
-                }
-                .frame(width: 180)
-                .padding(16)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .topTrailing)))
+            if isOn.wrappedValue {
+                panel()
+                    .padding(16)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .topTrailing)))
             }
+        }
+    }
+
+    /// Sous-menu d'édition : annuler / rétablir / effacer.
+    private var editControls: some View {
+        revealGroup(isOn: $showEditControls, icon: "arrow.uturn.backward", label: "group.edit") {
+            HStack(spacing: 22) {
+                editButton("arrow.uturn.backward", "action.undo", enabled: model.canUndo) { model.undo() }
+                editButton("arrow.uturn.forward", "action.redo", enabled: model.canRedo) { model.redo() }
+                editButton("trash", "action.clear", enabled: !model.strokes.isEmpty) { model.clear() }
+            }
+        }
+    }
+
+    /// Sous-menu « ciel » : centrer sur le Soleil / la Lune, et éphéméride.
+    private func skyControls(sun: CelestialPosition, moon: CelestialPosition) -> some View {
+        revealGroup(isOn: $showSkyControls, icon: "sun.and.horizon", label: "group.sky") {
+            HStack(spacing: 22) {
+                editButton("sun.max", "sky.centerSun", enabled: sun.altitude > 0) { center(on: sun) }
+                editButton("moon.stars", "sky.centerMoon", enabled: moon.altitude > 0) { center(on: moon) }
+                editButton("info.circle", "ephemeris.title", enabled: true) { showEphemeris = true }
+            }
+        }
+    }
+
+    /// Sous-menu « lieu ».
+    private var positionControls: some View {
+        revealGroup(isOn: $showPositionControls, icon: "globe", label: "location.title") {
+            positionPanel
+        }
+    }
+
+    /// Sous-menu « pinceau » : rayon et adoucissement (prochains traits).
+    private var brushControls: some View {
+        revealGroup(isOn: $showBrushControls, icon: "paintbrush.pointed", label: "group.brush") {
+            VStack(spacing: 14) {
+                brushSlider(
+                    icon: "smallcircle.filled.circle",
+                    value: binding(\.brushRadius), range: 0.03...0.25)
+                brushSlider(
+                    icon: "drop",
+                    value: binding(\.brushSoftness), range: 0...1)
+            }
+            .frame(width: 180)
         }
     }
 
@@ -593,18 +623,6 @@ struct CanvasView: View {
         Binding(get: { model[keyPath: keyPath] }, set: { model[keyPath: keyPath] = $0 })
     }
 
-    /// Barre d'édition : annuler / rétablir / effacer (registre sobre).
-    private var editToolbar: some View {
-        HStack(spacing: 24) {
-            editButton("arrow.uturn.backward", "action.undo", enabled: model.canUndo) { model.undo() }
-            editButton("arrow.uturn.forward", "action.redo", enabled: model.canRedo) { model.redo() }
-            editButton("trash", "action.clear", enabled: !model.strokes.isEmpty) { model.clear() }
-        }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 12)
-        .background(.ultraThinMaterial, in: Capsule())
-    }
-
     private func editButton(
         _ systemName: String, _ labelKey: String.LocalizationValue,
         enabled: Bool, action: @escaping () -> Void
@@ -616,25 +634,6 @@ struct CanvasView: View {
         .foregroundStyle(enabled ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
         .disabled(!enabled)
         .accessibilityLabel(Text(String(localized: labelKey, table: "Aether")))
-    }
-
-    /// Barre « ciel » : centrer le regard sur le Soleil ou la Lune (actif quand
-    /// l'astre est au-dessus de l'horizon), et ouvrir l'éphéméride.
-    private func skyToolbar(sun: CelestialPosition, moon: CelestialPosition) -> some View {
-        HStack(spacing: 24) {
-            editButton("sun.max", "sky.centerSun", enabled: sun.altitude > 0) {
-                center(on: sun)
-            }
-            editButton("moon.stars", "sky.centerMoon", enabled: moon.altitude > 0) {
-                center(on: moon)
-            }
-            editButton("info.circle", "ephemeris.title", enabled: true) {
-                showEphemeris = true
-            }
-        }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 12)
-        .background(.ultraThinMaterial, in: Capsule())
     }
 
     /// Oriente le regard vers un astre : le cap/tangage de visée rejoignent son

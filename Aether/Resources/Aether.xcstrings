@@ -128,30 +128,38 @@
     },
     "ephemeris.alwaysDown" : {
       "comment" : "Éphéméride : astre sous l'horizon tout le jour (nuit polaire).",
+      "extractionState" : "stale",
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Below the horizon" } },
-        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Sous l’horizon" } }
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Below the horizon"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sous l’horizon"
+          }
+        }
       }
     },
     "ephemeris.alwaysUp" : {
       "comment" : "Éphéméride : astre au-dessus de l'horizon tout le jour (soleil de minuit).",
+      "extractionState" : "stale",
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Above the horizon" } },
-        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Au-dessus de l’horizon" } }
-      }
-    },
-    "ephemeris.moon" : {
-      "comment" : "Éphéméride : nom de l'astre Lune (cas circumpolaire).",
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Moon" } },
-        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Lune" } }
-      }
-    },
-    "ephemeris.sun" : {
-      "comment" : "Éphéméride : nom de l'astre Soleil (cas circumpolaire).",
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sun" } },
-        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Soleil" } }
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Above the horizon"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Au-dessus de l’horizon"
+          }
+        }
       }
     },
     "ephemeris.illumination" : {
@@ -168,6 +176,24 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visibilité"
+          }
+        }
+      }
+    },
+    "ephemeris.moon" : {
+      "comment" : "Éphéméride : nom de l'astre Lune (cas circumpolaire).",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Moon"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lune"
           }
         }
       }
@@ -226,6 +252,24 @@
         }
       }
     },
+    "ephemeris.sun" : {
+      "comment" : "Éphéméride : nom de l'astre Soleil (cas circumpolaire).",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sun"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Soleil"
+          }
+        }
+      }
+    },
     "ephemeris.sunrise" : {
       "comment" : "Éphéméride : heure du lever du Soleil.",
       "extractionState" : "stale",
@@ -275,6 +319,60 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Éphéméride"
+          }
+        }
+      }
+    },
+    "group.brush" : {
+      "comment" : "Accessibilité : bascule du sous-menu réglages du pinceau.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Brush"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pinceau"
+          }
+        }
+      }
+    },
+    "group.edit" : {
+      "comment" : "Accessibilité : bascule du sous-menu édition (annuler/rétablir/effacer).",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Editing"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Édition"
+          }
+        }
+      }
+    },
+    "group.sky" : {
+      "comment" : "Accessibilité : bascule du sous-menu ciel (soleil/lune/éphéméride).",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sky"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ciel"
           }
         }
       }
