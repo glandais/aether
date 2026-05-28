@@ -41,7 +41,8 @@ extension CuratedLandscape {
             date: utc(2026, 5, 25, 19, 15),
             weather: WeatherSnapshot(
                 condition: .partlyCloudy, cloudCover: 0.45, humidity: 0.65,
-                windSpeed: 3, temperature: 16)),
+                windSpeed: 3, temperature: 16),
+            sea: .calm),
         CuratedLandscape(
             title: "Aube",
             palette: LandscapeFactory.Palette(
