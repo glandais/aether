@@ -21,6 +21,13 @@ private enum AutoPlay {
     }
 }
 
+/// Panneau d'outil ouvert. Exclusif : un seul à la fois, pour ne pas encombrer
+/// le ciel ni déborder en paysage. `more` regroupe les réglages contextuels
+/// (ciel, lieu) sous un seul bouton, façon « More » HIG.
+private enum ToolPanel {
+    case brush, more
+}
+
 struct CanvasView: View {
     let context: SceneContext
 
@@ -44,16 +51,16 @@ struct CanvasView: View {
     @State private var autoPlay: AutoPlay = .none
     /// Multiplicateur de vitesse du défilement (1, 2, 4, 8, 16). 1× = 0,25 h/s.
     @State private var autoPlaySpeed = 1
-    /// Sous-menus repliés façon pinceau (révélés à la demande, pour un ciel
-    /// dégagé) : édition (annuler/rétablir/effacer), ciel (soleil/lune/éphéméride),
-    /// lieu. La date et l'heure restent affichées en base.
-    @State private var showEditControls = false
-    @State private var showSkyControls = false
-    @State private var showPositionControls = false
-    @State private var showBrushControls = false
+    /// Panneau d'outil ouvert (pinceau, ou « More » = ciel + lieu). Exclusif :
+    /// ouvrir l'un referme l'autre. Rendu en carte flottante **à côté** des
+    /// pastilles (pas d'expansion inline qui repousserait la colonne).
+    @State private var activePanel: ToolPanel?
     /// Révèle toutes les options (retour, regard, pinceau, heure). Replié par
     /// défaut : seule la bascule « Options » est visible, pour un ciel dégagé.
     @State private var showOptions = false
+    /// Hauteur compacte (paysage iPhone) : la palette passe en rangée
+    /// horizontale, la largeur (abondante) absorbant les pastilles.
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     /// Orientation du regard au début d'un drag de rotation (lacet, tangage).
     @State private var rotationAnchor: SIMD2<Float>?
     /// Champ de vision choisi (radians). `nil` = FOV d'origine de la scène.
@@ -145,21 +152,8 @@ struct CanvasView: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            VStack(alignment: .trailing, spacing: 10) {
-                optionsButton
-                if showOptions {
-                    let reveal = AnyTransition.opacity.combined(with: .move(edge: .top))
-                    rotateButton.transition(reveal)
-                    if hasEdits {
-                        editControls.transition(reveal)
-                    }
-                    skyControls(sun: light.sunPosition, moon: light.moonPosition)
-                        .transition(reveal)
-                    positionControls.transition(reveal)
-                    brushControls.transition(reveal)
-                }
-            }
-            .padding(.trailing, 16).padding(.top, 8)
+            toolPalette(light: light)
+                .padding(.trailing, 16).padding(.top, 8)
         }
         // Recalcul des étoiles hors `body` : seulement au changement de lieu/heure
         // (bucket ~60 s), pas à chaque frame de rotation/zoom.
@@ -237,13 +231,83 @@ struct CanvasView: View {
     /// pinceau, heure).
     private var optionsButton: some View {
         Button {
-            withAnimation(.easeInOut(duration: 0.2)) { showOptions.toggle() }
+            withAnimation(.easeInOut(duration: 0.2)) {
+                showOptions.toggle()
+                if !showOptions { activePanel = nil }  // replier referme tout panneau
+            }
         } label: {
             bubbleLabel("slider.horizontal.3", active: showOptions)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(String(localized: "mode.options", table: "Aether")))
     }
+
+    /// Palette d'outils, axe adaptatif : colonne en portrait, rangée en paysage
+    /// (hauteur compacte). La bascule « Options » est toujours visible ; ouverte,
+    /// elle révèle regard, édition (annuler/rétablir/effacer), pinceau et
+    /// « More » (ciel + lieu). Le panneau
+    /// actif flotte **à côté** des pastilles (carte `ultraThinMaterial`) sans
+    /// jamais les repousser : à gauche de la colonne (portrait), sous la rangée
+    /// (paysage). C'est ce découplage qui supprime le débordement en paysage.
+    @ViewBuilder
+    private func toolPalette(light: ResolvedLight) -> some View {
+        let card = activePanelCard(light: light)
+        if isCompactHeight {
+            VStack(alignment: .trailing, spacing: 12) {
+                bubbleStack
+                card
+            }
+        } else {
+            HStack(alignment: .top, spacing: 12) {
+                card
+                bubbleStack
+            }
+        }
+    }
+
+    /// La pile de pastilles (axe adaptatif), sans le panneau.
+    @ViewBuilder
+    private var bubbleStack: some View {
+        let reveal = AnyTransition.opacity.combined(
+            with: .move(edge: isCompactHeight ? .trailing : .top))
+        let bubbles = Group {
+            optionsButton
+            if showOptions {
+                rotateButton.transition(reveal)
+                // Annuler / rétablir / effacer : pastilles principales directes
+                // (pas de sous-menu), révélées seulement dès qu'il y a à éditer.
+                if hasEdits {
+                    actionBubble("arrow.uturn.backward", "action.undo", enabled: model.canUndo) { model.undo() }
+                        .transition(reveal)
+                    actionBubble("arrow.uturn.forward", "action.redo", enabled: model.canRedo) { model.redo() }
+                        .transition(reveal)
+                    actionBubble("trash", "action.clear", enabled: !model.strokes.isEmpty) { model.clear() }
+                        .transition(reveal)
+                }
+                brushBubble.transition(reveal)
+                moreBubble.transition(reveal)
+            }
+        }
+        if isCompactHeight {
+            HStack(alignment: .top, spacing: 10) { bubbles }
+        } else {
+            VStack(alignment: .trailing, spacing: 10) { bubbles }
+        }
+    }
+
+    /// Carte du panneau actif (vide si aucun), en matériau translucide.
+    @ViewBuilder
+    private func activePanelCard(light: ResolvedLight) -> some View {
+        if let panel = activePanel {
+            panelContent(panel, light: light)
+                .padding(16)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .topTrailing)))
+        }
+    }
+
+    /// Paysage iPhone (la palette passe à l'horizontale).
+    private var isCompactHeight: Bool { verticalSizeClass == .compact }
 
     /// Bascule le mode rotation du regard (jumeau du bouton pinceau).
     private var rotateButton: some View {
@@ -487,9 +551,9 @@ struct CanvasView: View {
 
             HStack(spacing: 22) {
                 editButton("map", "location.title", enabled: true) {
-                    showLocationPicker = true
+                    activePanel = nil; showLocationPicker = true
                 }
-                Button(action: resetToHereAndNow) {
+                Button { activePanel = nil; resetToHereAndNow() } label: {
                     Group {
                         if isResolvingHereNow {
                             ProgressView()
@@ -642,60 +706,60 @@ struct CanvasView: View {
             .background(.ultraThinMaterial, in: Circle())
     }
 
-    private func revealGroup<Content: View>(
-        isOn: Binding<Bool>, icon: String, label: String.LocalizationValue,
-        @ViewBuilder panel: () -> Content
+    /// Pastille-bascule exclusive : ouvrir un panneau referme l'autre. Le
+    /// contenu est rendu à part par `panelContent` (carte flottante).
+    private func bubbleToggle(
+        _ panel: ToolPanel, icon: String, label: String.LocalizationValue
     ) -> some View {
-        VStack(alignment: .trailing, spacing: 10) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) { isOn.wrappedValue.toggle() }
-            } label: {
-                bubbleLabel(icon, active: isOn.wrappedValue)
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                activePanel = (activePanel == panel) ? nil : panel
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text(String(localized: label, table: "Aether")))
-
-            if isOn.wrappedValue {
-                panel()
-                    .padding(16)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-                    .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .topTrailing)))
-            }
+        } label: {
+            bubbleLabel(icon, active: activePanel == panel)
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(String(localized: label, table: "Aether")))
     }
 
-    /// Sous-menu d'édition : annuler / rétablir / effacer.
-    private var editControls: some View {
-        revealGroup(isOn: $showEditControls, icon: "arrow.uturn.backward", label: "group.edit") {
-            HStack(spacing: 22) {
-                editButton("arrow.uturn.backward", "action.undo", enabled: model.canUndo) { model.undo() }
-                editButton("arrow.uturn.forward", "action.redo", enabled: model.canRedo) { model.redo() }
-                editButton("trash", "action.clear", enabled: !model.strokes.isEmpty) { model.clear() }
-            }
+    /// Pastille-action principale (annuler/rétablir/effacer) : déclenche une
+    /// action sans panneau, grisée quand indisponible. Même pastille circulaire
+    /// que les bascules, pour un alignement homogène dans la palette.
+    private func actionBubble(
+        _ icon: String, _ label: String.LocalizationValue,
+        enabled: Bool, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 18, height: 18)
+                .foregroundStyle(.primary)
+                .padding(13)
+                .background(.ultraThinMaterial, in: Circle())
+                // Pastille entière atténuée quand indisponible : un glyphe
+                // tertiaire seul serait illisible sur l'horizon clair.
+                .opacity(enabled ? 1 : 0.4)
         }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(Text(String(localized: label, table: "Aether")))
     }
 
-    /// Sous-menu « ciel » : centrer sur le Soleil / la Lune, et éphéméride.
-    private func skyControls(sun: CelestialPosition, moon: CelestialPosition) -> some View {
-        revealGroup(isOn: $showSkyControls, icon: "sun.and.horizon", label: "group.sky") {
-            HStack(spacing: 22) {
-                editButton("sun.max", "sky.centerSun", enabled: sun.altitude > 0) { center(on: sun) }
-                editButton("moon.stars", "sky.centerMoon", enabled: moon.altitude > 0) { center(on: moon) }
-                editButton("info.circle", "ephemeris.title", enabled: true) { showEphemeris = true }
-            }
-        }
+    private var brushBubble: some View {
+        bubbleToggle(.brush, icon: "paintbrush.pointed", label: "group.brush")
     }
 
-    /// Sous-menu « lieu ».
-    private var positionControls: some View {
-        revealGroup(isOn: $showPositionControls, icon: "globe", label: "location.title") {
-            positionPanel
-        }
+    /// Pastille « More » : regroupe les réglages contextuels (ciel, lieu).
+    private var moreBubble: some View {
+        bubbleToggle(.more, icon: "ellipsis", label: "group.more")
     }
 
-    /// Sous-menu « pinceau » : rayon et adoucissement (prochains traits).
-    private var brushControls: some View {
-        revealGroup(isOn: $showBrushControls, icon: "paintbrush.pointed", label: "group.brush") {
+    /// Contenu du panneau actif.
+    @ViewBuilder
+    private func panelContent(_ panel: ToolPanel, light: ResolvedLight) -> some View {
+        switch panel {
+        case .brush:
             VStack(spacing: 14) {
                 brushSlider(
                     icon: "smallcircle.filled.circle",
@@ -705,6 +769,28 @@ struct CanvasView: View {
                     value: binding(\.brushSoftness), range: 0...1)
             }
             .frame(width: 180)
+        case .more:
+            // Réglages contextuels (rares par geste) : ciel (centrer soleil/lune,
+            // éphéméride) et lieu. Les actions qui ouvrent une feuille (carte,
+            // éphéméride) ou recadrent le regard referment d'abord le panneau.
+            VStack(alignment: .trailing, spacing: 16) {
+                HStack(spacing: 22) {
+                    editButton("sun.max", "sky.centerSun", enabled: light.sunPosition.altitude > 0) {
+                        activePanel = nil; center(on: light.sunPosition)
+                    }
+                    editButton("moon.stars", "sky.centerMoon", enabled: light.moonPosition.altitude > 0) {
+                        activePanel = nil; center(on: light.moonPosition)
+                    }
+                    editButton("info.circle", "ephemeris.title", enabled: true) {
+                        activePanel = nil; showEphemeris = true
+                    }
+                }
+                Divider()
+                positionPanel
+            }
+            // Borne la largeur : sinon le Divider étire la carte sur toute la
+            // largeur proposée (grand vide à gauche, surtout en paysage).
+            .frame(width: 230)
         }
     }
 

@@ -359,6 +359,24 @@
         }
       }
     },
+    "group.more" : {
+      "comment" : "Accessibilité : bascule du panneau « More » (réglages ciel + lieu).",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "More"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Plus"
+          }
+        }
+      }
+    },
     "group.sky" : {
       "comment" : "Accessibilité : bascule du sous-menu ciel (soleil/lune/éphéméride).",
       "extractionState" : "stale",
