@@ -240,12 +240,15 @@ final class Renderer: NSObject, MTKViewDelegate {
     // masse proche, profondeur pour l'épaisseur quand on orbite. Calculés une
     // fois (premier draw).
     private static let baseTanHalfFov = Float(tan(Scene.defaultFieldOfView / 2))
-    private static let volumeHeightFactor: Float = 0.42
-    private static let volumeHalfDepth: Float = 1.3
+    // Largeur un peu plus large que le cadre (présence), hauteur aplatie mais
+    // pas écrasée (un nuage bas et large plutôt qu'une masse haute).
+    private static let volumeWidthFactor: Float = 1.2
+    private static let volumeHeightFactor: Float = 0.7
+    private static let volumeHalfDepth: Float = 1.7
     // Soulèvement du centre : la base du volume reste au-dessus de l'horizon
     // (jamais dans la mer), avec ce dégagement de ciel sous le nuage (unités
-    // monde, à la profondeur du volume).
-    private static let volumeSkyGap: Float = 0.55
+    // monde, à la profondeur du volume). Faible → nuage bas, proche de l'eau.
+    private static let volumeSkyGap: Float = 0.18
     private var volumeHalfExtents: SIMD3<Float>?
 
     // Résolution du volume de densité peint. La forme y est lisse (le détail
@@ -511,7 +514,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         let halfExtents = volumeHalfExtents ?? {
             let frameHalf = Renderer.volumeDistance * Renderer.baseTanHalfFov
             let extents = SIMD3<Float>(
-                frameHalf * aspect,
+                frameHalf * aspect * Renderer.volumeWidthFactor,
                 frameHalf * Renderer.volumeHeightFactor,
                 Renderer.volumeHalfDepth)
             volumeHalfExtents = extents

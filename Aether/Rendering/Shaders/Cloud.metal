@@ -43,6 +43,7 @@ struct CloudInOut {
 
 constant float kNoiseScale = 0.42f;    // world units → noise texture frequency
 constant float kSigma = 11.0f;         // extinction coefficient
+constant float kBoxFeather = 0.12f;    // fade density near the AABB faces (no hard cube)
 constant int   kViewSteps = 64;
 constant int   kLightSteps = 6;
 constant float kLightStep = 0.15f;
@@ -88,6 +89,15 @@ static inline float cloudDensity(float3 p, float time, float coverageBias,
         return 0.0f;
     }
     float painted = saturate(shape.sample(shapeSampler, uvw).r + coverageBias);
+    if (painted <= 0.001f) {
+        return 0.0f;
+    }
+
+    // Feather the painted shape toward the AABB faces so the box itself is never
+    // visible as a hard cube — the cloud dissolves into the sky at its bounds.
+    float3 edge = min(uvw, 1.0f - uvw);
+    float boxFade = smoothstep(0.0f, kBoxFeather, min(edge.x, min(edge.y, edge.z)));
+    painted *= boxFade;
     if (painted <= 0.001f) {
         return 0.0f;
     }
