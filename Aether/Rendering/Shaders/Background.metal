@@ -409,8 +409,8 @@ fragment float4 sky_background_fragment(BackgroundInOut in [[stage_in]],
     // Cloud.metal): -Z = North, +X = East, +Y = up. The gaze can be rotated
     // (yaw + pitch) via the camera→world basis passed from the Renderer; at the
     // identity basis (right=+X, up=+Y, forward=-Z) this equals the fixed
-    // North-facing ray. The cloud volume stays screen-locked (painting resets on
-    // rotation), so only the sky ray and the sun lighting follow the gaze.
+    // North-facing ray. The cloud volume is world-fixed and uses the same basis,
+    // so sky, sun and clouds all follow the gaze together.
     const float tanHalfFov = sky.camera.x;
     const float aspect = sky.camera.y;
     const float2 ndc = float2(in.uv.x * 2.0 - 1.0, 1.0 - in.uv.y * 2.0);

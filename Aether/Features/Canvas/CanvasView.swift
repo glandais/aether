@@ -474,6 +474,13 @@ struct CanvasView: View {
             pitch: context.scene.pitch + Double(model.viewPitch))
     }
 
+    /// Avant de base de la scène (cap + tangage du paysage, **sans** le regard
+    /// utilisateur) : ancre le volume de nuage à position réelle en monde, donc
+    /// indépendant des angles de caméra courants.
+    private var baseForward: SIMD3<Float> {
+        CameraPose(heading: context.scene.heading, pitch: context.scene.pitch).basis.forward
+    }
+
     // MARK: - Vues
 
     @ViewBuilder
@@ -502,6 +509,7 @@ struct CanvasView: View {
             cameraRight: basis.right,
             cameraUp: basis.up,
             cameraForward: basis.forward,
+            baseForward: baseForward,
             landscape: context.landscape,
             contentID: context.id
         )
@@ -823,10 +831,10 @@ struct CanvasView: View {
     }
 
     /// Oriente le regard vers un astre : le cap/tangage de visée rejoignent son
-    /// azimut/altitude (le tangage est clampé par `CanvasModel`). Comme toute
-    /// reframe, on repart d'un ciel vierge.
+    /// azimut/altitude (le tangage est clampé par `CanvasModel`). Le nuage étant
+    /// à position réelle en monde, recentrer ne l'efface plus : il reste en place
+    /// et entre/sort du cadre selon le regard.
     private func center(on body: CelestialPosition) {
-        model.clearForCameraChange()
         model.setRotation(
             yaw: Float(body.azimuth - context.scene.heading),
             pitch: Float(body.altitude - context.scene.pitch))
@@ -861,8 +869,9 @@ struct CanvasView: View {
     /// Pincement à deux doigts → champ de vision (zoom). Disponible **seulement
     /// en mode rotation** (le pincement est un mouvement de caméra, comme le
     /// drag qui pivote le regard). Pincer pour écarter (magnification > 1)
-    /// rétrécit le FOV (zoom avant) ; il efface les nuages à la prise (on
-    /// reframe un ciel vierge). Clampé entre min/max FOV.
+    /// rétrécit le FOV (zoom avant). Le nuage étant à position réelle en monde,
+    /// le zoom ne l'efface plus : on zoome dans/hors d'un nuage fixe. Clampé
+    /// entre min/max FOV.
     private var zoomGesture: some Gesture {
         MagnifyGesture()
             .onChanged { value in
@@ -870,7 +879,6 @@ struct CanvasView: View {
                 if fovAnchor == nil {
                     fovAnchor = effectiveFieldOfView
                     isZooming = true
-                    model.clearForCameraChange()
                 }
                 let target = (fovAnchor ?? effectiveFieldOfView) / Double(value.magnification)
                 fovOverride = min(max(target, Self.minFieldOfView), Self.maxFieldOfView)
@@ -881,7 +889,9 @@ struct CanvasView: View {
             }
     }
 
-    /// Peinture d'un trait (coordonnées normalisées au canvas).
+    /// Peinture d'un trait (coordonnées normalisées au canvas). Le trait fige la
+    /// pose de caméra courante : le Rendering projettera le trait dans le volume
+    /// monde via cette pose, donc il reste en place quand on tourne ensuite.
     private func paint(_ value: DragGesture.Value, in size: CGSize) {
         let point = SIMD2(
             Float(value.location.x / size.width),
@@ -890,13 +900,19 @@ struct CanvasView: View {
         if model.isDrawing {
             model.extendStroke(to: point)
         } else {
-            model.beginStroke(at: point)
+            let basis = cameraPose.basis
+            let camera = StrokeCamera(
+                right: basis.right, up: basis.up, forward: basis.forward,
+                tanHalfFov: tanHalfFieldOfView,
+                aspect: Float(size.width / size.height))
+            model.beginStroke(at: point, camera: camera)
         }
     }
 
     /// Rotation du regard. « Saisir le ciel » : drag à droite → le ciel glisse
     /// à droite (on tourne la tête à gauche) ; drag vers le bas → on lève les
-    /// yeux. Les nuages s'effacent à la prise (on pivote un ciel vierge).
+    /// yeux. Le nuage étant à position réelle en monde, pivoter ne l'efface plus :
+    /// on regarde autour / on l'orbite.
     private func rotate(_ value: DragGesture.Value, in size: CGSize) {
         let anchor: SIMD2<Float>
         if let existing = rotationAnchor {
@@ -904,7 +920,6 @@ struct CanvasView: View {
         } else {
             anchor = SIMD2(model.viewYaw, model.viewPitch)
             rotationAnchor = anchor
-            model.clearForCameraChange()
         }
         let yaw = anchor.x - Float(value.translation.width / size.width) * Self.yawSpan
         let pitch = anchor.y + Float(value.translation.height / size.height) * Self.pitchSpan

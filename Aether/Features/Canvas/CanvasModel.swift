@@ -39,9 +39,10 @@ final class CanvasModel {
     var canUndo: Bool { !undoStack.isEmpty }
     var canRedo: Bool { !redoStack.isEmpty }
 
-    func beginStroke(at point: SIMD2<Float>) {
+    func beginStroke(at point: SIMD2<Float>, camera: StrokeCamera) {
         recordHistory()  // instantané d'avant-trait : l'annulation y revient
-        strokes.append(BrushStroke(points: [point], radius: brushRadius, softness: brushSoftness))
+        strokes.append(BrushStroke(
+            points: [point], radius: brushRadius, softness: brushSoftness, camera: camera))
         isDrawing = true
     }
 
@@ -84,17 +85,6 @@ final class CanvasModel {
     func setRotation(yaw: Float, pitch: Float) {
         viewYaw = yaw
         viewPitch = min(max(pitch, -Self.maxPitch), Self.maxPitch)
-    }
-
-    /// « Repartir à zéro » au début d'un mouvement de caméra (rotation du regard
-    /// ou zoom/FOV) : on reframe un ciel vierge. Vide les traits **et**
-    /// l'historique (effacement non annulable, distinct de `clear`). N'affecte
-    /// ni l'orientation ni le FOV.
-    func clearForCameraChange() {
-        strokes = []
-        undoStack.removeAll()
-        redoStack.removeAll()
-        isDrawing = false
     }
 
     /// Empile l'état courant et invalide la pile de rétablissement (nouvelle

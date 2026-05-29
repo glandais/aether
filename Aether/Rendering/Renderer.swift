@@ -16,6 +16,10 @@ private struct CloudUniforms {
     var camera: SIMD4<Float>  // x: tan(FOV vertical / 2)
     var lightSun: SIMD4<Float>
     var lightAmbient: SIMD4<Float>
+    // Base caméra → monde du regard (lacet + tangage), pour le rayon de vue.
+    var camRight: SIMD4<Float>
+    var camUp: SIMD4<Float>
+    var camForward: SIMD4<Float>
 }
 
 /// Un « dab » de pinceau envoyé au compute shader. Doit correspondre à `Dab`
@@ -26,10 +30,24 @@ private struct Dab {
     var softness: Float
 }
 
+/// Uniforms du stampage : boîte monde + pose caméra du trait, pour projeter
+/// chaque voxel vers le canvas peint. Doit correspondre à `StampUniforms` dans
+/// `BrushPaint.metal`.
+private struct StampUniforms {
+    var boxMin: SIMD4<Float>     // xyz: coin min de l'AABB monde
+    var boxSize: SIMD4<Float>    // xyz: taille de l'AABB monde
+    var boxCenter: SIMD4<Float>  // xyz: centre monde (plan de profondeur du trait)
+    var camRight: SIMD4<Float>   // base caméra → monde au moment du trait
+    var camUp: SIMD4<Float>
+    var camForward: SIMD4<Float>
+    var params: SIMD4<Float>     // x: tan(FOV/2) ; y: aspect ; z: sigma profondeur
+}
+
 /// Amortissement temporel (étape 7). Doit correspondre à `CloudTemporal` dans
 /// `Cloud.metal`.
 private struct CloudTemporal {
     var activeIndex: UInt32
+    var cameraMoving: UInt32  // 1 pendant la rotation/zoom du regard
 }
 
 /// Uniforms du shader de ciel atmosphérique. Disposition mémoire **identique**
@@ -200,13 +218,29 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var cameraRight = SIMD3<Float>(1, 0, 0)
     private var cameraUp = SIMD3<Float>(0, 1, 0)
     private var cameraForward = SIMD3<Float>(0, 0, -1)
+    // Avant de base de la scène (cap + tangage du paysage, sans le regard
+    // utilisateur) : ancre le volume de nuage en monde, indépendamment du regard.
+    private var baseForward = SIMD3<Float>(0, 0, -1)
+    // Détection du mouvement du regard (rotation/zoom) d'une frame à l'autre :
+    // désactive l'amortissement temporel tant que le regard bouge (sinon le
+    // nuage persistant traîne au lieu de suivre le rayon). Repli identité.
+    private var lastCameraForward = SIMD3<Float>(0, 0, -1)
+    private var lastCameraTanHalfFov: Float = 0.5
 
     // Éclairage résolu par la Feature (couleur soleil par altitude × exposition
     // de la photo, et ambiance ciel). Valeurs de repli avant mise à jour.
     private var sunColor = SIMD3<Float>(6.5, 4.7, 3.4)
     private var skyAmbient = SIMD3<Float>(0.34, 0.40, 0.55)
-    // Profondeur (distance caméra → centre du volume), pour le cadrage.
+    // Profondeur (distance œil → centre du volume), pour l'ancrage en monde.
     private static let volumeDistance: Float = 5.0
+    // Demi-extents **monde** figés du volume (boîte à position réelle, ne suit
+    // plus le regard ni le FOV courant). La hauteur cale le cadrage d'origine
+    // sur le FOV de base de la scène ; la largeur reprend l'aspect au chargement
+    // (cadrage identique au démarrage) ; la profondeur donne une épaisseur
+    // lisible quand on orbite autour du nuage. Calculés une fois (premier draw).
+    private static let baseTanHalfFov = Float(tan(Scene.defaultFieldOfView / 2))
+    private static let volumeHalfDepth: Float = 1.8
+    private var volumeHalfExtents: SIMD3<Float>?
 
     // Résolution du volume de densité peint. La forme y est lisse (le détail
     // vient du bruit Perlin-Worley), donc une résolution modeste suffit.
@@ -215,16 +249,22 @@ final class Renderer: NSObject, MTKViewDelegate {
     private static let volumeDepth = 48
     private static let maxDabs = 768
     private static let cloudColorFormat: MTLPixelFormat = .rgba16Float
+    // Épaisseur du dépôt le long du rayon de visée du trait (gaussienne, unités
+    // monde) : sans elle, projeter le pinceau peindrait un tube infini à travers
+    // la boîte. Centrée sur le plan de profondeur du centre de la boîte.
+    private static let stampDepthSigma: Float = 1.0
 
-    // Nombre de dabs déjà stampés dans le volume (repeinte incrémentale).
+    // Traits à stamper, fournis par la Feature ; réconciliés avec le volume au
+    // début de `draw` (où la boîte monde est connue). `stampedStrokes` est le
+    // reflet exact de ce qui est déjà cuit dans le volume ; `stampedDabCount` le
+    // total de dabs cuits (plafonné à `maxDabs`). Le volume étant persistant en
+    // monde, ni la rotation ni le zoom n'imposent plus de repeinte.
+    private var pendingStrokes: [BrushStroke] = []
+    private var stampedStrokes: [BrushStroke] = []
     private var stampedDabCount = 0
-    // Liste complète des dabs courants, conservée pour pouvoir repeindre tout le
-    // volume quand l'aspect change (rotation) — le pinceau reste alors circulaire.
-    private var dabs: [Dab] = []
-    // Aspect du dernier `draw` (largeur/hauteur du drawable) et aspect avec lequel
-    // le volume a été stampé ; un écart déclenche une repeinte intégrale.
-    private var lastAspect: Float = 1
-    private var stampedAspect: Float = 1
+    // Centre monde de la boîte avec lequel le volume a été cuit ; un changement
+    // (nouvelle scène) force une repeinte intégrale.
+    private var stampedCenter: SIMD3<Float>?
 
     init?(view: MTKView) {
         guard let device = view.device ?? MTLCreateSystemDefaultDevice(),
@@ -345,6 +385,12 @@ final class Renderer: NSObject, MTKViewDelegate {
         cameraForward = forward
     }
 
+    /// Reçoit l'avant de base de la scène (cap + tangage du paysage, sans le
+    /// regard utilisateur) : ancre le volume de nuage en monde.
+    func updateBaseForward(_ forward: SIMD3<Float>) {
+        baseForward = forward
+    }
+
     /// Reçoit l'éclairage résolu (couleur soleil + ambiance) depuis la Feature.
     func updateLighting(sunColor: SIMD3<Float>, ambient: SIMD3<Float>) {
         self.sunColor = sunColor
@@ -414,36 +460,10 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
     }
 
-    /// Reçoit les traits du canvas (coord. normalisées) et met à jour le volume
-    /// de façon incrémentale : seuls les dabs ajoutés depuis la dernière mise à
-    /// jour sont stampés. Un trait qui s'allonge coûte O(nouveaux dabs).
+    /// Reçoit les traits du canvas (coord. normalisées). Le stampage effectif a
+    /// lieu dans `draw`, où la boîte monde est connue (`reconcileVolume`).
     func updateStrokes(_ strokes: [BrushStroke]) {
-        var built: [Dab] = []
-        outer: for stroke in strokes {
-            for point in stroke.points {
-                built.append(Dab(center: point, radius: stroke.radius, softness: stroke.softness))
-                if built.count >= Renderer.maxDabs {
-                    break outer
-                }
-            }
-        }
-        dabs = built
-
-        let aspectChanged = lastAspect != stampedAspect
-        if dabs.count == stampedDabCount && !aspectChanged {
-            return  // rien de nouveau
-        }
-        if aspectChanged || dabs.count < stampedDabCount {
-            // Aspect changé (rotation) ou effacement : on repart d'un volume vide
-            // pour restamper tous les dabs au nouvel aspect (pinceau circulaire).
-            clearVolume()
-            stampedDabCount = 0
-        }
-        stampedAspect = lastAspect
-        if dabs.count > stampedDabCount {
-            stampDabs(Array(dabs[stampedDabCount..<dabs.count]), aspect: lastAspect)
-            stampedDabCount = dabs.count
-        }
+        pendingStrokes = strokes
     }
 
     func draw(in view: MTKView) {
@@ -477,34 +497,52 @@ final class Renderer: NSObject, MTKViewDelegate {
         let historyTarget = cloudTargets[(frameIndex + 1) % 2]
 
         let aspect = Float(fullWidth) / Float(fullHeight)
-        lastAspect = aspect
-        // Rotation depuis le dernier stamp : repeindre tout le volume au nouvel
-        // aspect pour que le pinceau reste circulaire à l'écran (les traits ne
-        // changent pas, seul change le repère ; cf. `stamp_density_volume`).
-        if aspect != stampedAspect, !dabs.isEmpty {
-            clearVolume()
-            stampDabs(dabs, aspect: aspect)
-            stampedDabCount = dabs.count
-            stampedAspect = aspect
-        }
         let elapsed = Float(CACurrentMediaTime() - startTime)
-        let volumeHalfHeight = Renderer.volumeDistance * cameraTanHalfFov
+
+        // Boîte de nuage à **position réelle** en monde : centre ancré le long de
+        // l'avant de base de la scène (indépendant du regard courant), demi-extents
+        // figés une fois (cadrage d'origine préservé via l'aspect au chargement).
+        let halfExtents = volumeHalfExtents ?? {
+            let halfH = Renderer.volumeDistance * Renderer.baseTanHalfFov
+            let extents = SIMD3<Float>(halfH * aspect, halfH, Renderer.volumeHalfDepth)
+            volumeHalfExtents = extents
+            return extents
+        }()
+        let volumeCenter = baseForward * Renderer.volumeDistance  // œil à l'origine
+
+        // Réconcilie le volume peint avec les traits courants (la boîte monde est
+        // maintenant connue) : delta incrémental, ou repeinte intégrale sur
+        // annulation/effacement/changement de boîte.
+        reconcileVolume(center: volumeCenter, halfExtents: halfExtents)
+
+        // Regard en mouvement (rotation/zoom) depuis la frame précédente : on
+        // désactive l'amortissement temporel le temps du mouvement (le nuage est
+        // persistant en monde, le rayon sous chaque pixel change → pas d'historique).
+        let movedAngle = dot(cameraForward, lastCameraForward) < 0.99999
+        let movedZoom = abs(cameraTanHalfFov - lastCameraTanHalfFov) > 1.0e-4
+        let cameraMoving = movedAngle || movedZoom
+        lastCameraForward = cameraForward
+        lastCameraTanHalfFov = cameraTanHalfFov
+
         var uniforms = CloudUniforms(
             resolution: SIMD2(Float(halfWidth), Float(halfHeight)),
             time: elapsed,
             aspect: aspect,
             // Direction du soleil résolue par l'AstroService (étape 8).
             sunDirection: SIMD4(sunDirection.x, sunDirection.y, sunDirection.z, 0.0),
-            // Volume cadré sur le frustum visible à la profondeur du volume,
-            // selon le FOV de la caméra (zoom) et l'aspect de l'écran.
-            volumeCenter: SIMD4(0.0, 0.0, -Renderer.volumeDistance, 0.0),
-            volumeHalfSize: SIMD4(volumeHalfHeight * aspect, volumeHalfHeight, 0.9, 0.0),
+            volumeCenter: SIMD4(volumeCenter.x, volumeCenter.y, volumeCenter.z, 0.0),
+            volumeHalfSize: SIMD4(halfExtents.x, halfExtents.y, halfExtents.z, 0.0),
             weather: SIMD4(cloudParameters.coverageBias, cloudParameters.densityScale, 0.0, 0.0),
             camera: SIMD4(cameraTanHalfFov, 0.0, 0.0, 0.0),
             lightSun: SIMD4(sunColor.x, sunColor.y, sunColor.z, 0.0),
-            lightAmbient: SIMD4(skyAmbient.x, skyAmbient.y, skyAmbient.z, 0.0)
+            lightAmbient: SIMD4(skyAmbient.x, skyAmbient.y, skyAmbient.z, 0.0),
+            camRight: SIMD4(cameraRight.x, cameraRight.y, cameraRight.z, 0.0),
+            camUp: SIMD4(cameraUp.x, cameraUp.y, cameraUp.z, 0.0),
+            camForward: SIMD4(cameraForward.x, cameraForward.y, cameraForward.z, 0.0)
         )
-        var temporal = CloudTemporal(activeIndex: Renderer.activeOrder[frameIndex % 4])
+        var temporal = CloudTemporal(
+            activeIndex: Renderer.activeOrder[frameIndex % 4],
+            cameraMoving: cameraMoving ? 1 : 0)
 
         // Passe 1 — nuage raymarché hors écran, à demi-résolution, amorti dans
         // le temps (1 cellule 2×2 sur 4 par frame, le reste vient de l'historique).
@@ -644,10 +682,87 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     // MARK: - Peinture du volume
 
+    /// Réconcilie le volume peint avec `pendingStrokes` pour la boîte monde
+    /// donnée. Le volume étant persistant en monde, on ne stampe que le delta
+    /// (suite du dernier trait + traits nouveaux) ; une annulation/effacement ou
+    /// un changement de boîte déclenche une repeinte intégrale (trait par trait,
+    /// chacun avec sa propre pose de caméra).
+    private func reconcileVolume(center: SIMD3<Float>, halfExtents: SIMD3<Float>) {
+        let boxMin = center - halfExtents
+        let boxSize = halfExtents * 2
+        let strokes = pendingStrokes
+        let boxChanged = stampedCenter != center
+
+        if boxChanged || !Renderer.isExtension(of: stampedStrokes, by: strokes) {
+            // Repeinte intégrale : volume vide, puis chaque trait avec sa pose.
+            clearVolume()
+            stampedDabCount = 0
+            for stroke in strokes {
+                if stampedDabCount >= Renderer.maxDabs { break }
+                stampStroke(stroke, points: stroke.points[...],
+                            boxMin: boxMin, boxSize: boxSize, center: center)
+            }
+            stampedStrokes = strokes
+            stampedCenter = center
+            return
+        }
+
+        // Extension pure : suite du dernier trait déjà cuit…
+        if let lastIdx = stampedStrokes.indices.last {
+            let baked = stampedStrokes[lastIdx].points.count
+            let now = strokes[lastIdx].points.count
+            if now > baked {
+                stampStroke(strokes[lastIdx], points: strokes[lastIdx].points[baked...],
+                            boxMin: boxMin, boxSize: boxSize, center: center)
+            }
+        }
+        // …puis les traits entièrement nouveaux.
+        var idx = stampedStrokes.count
+        while idx < strokes.count {
+            if stampedDabCount >= Renderer.maxDabs { break }
+            stampStroke(strokes[idx], points: strokes[idx].points[...],
+                        boxMin: boxMin, boxSize: boxSize, center: center)
+            idx += 1
+        }
+        stampedStrokes = strokes
+        stampedCenter = center
+    }
+
+    /// Les traits `new` prolongent-ils ceux déjà cuits `old` ? (aucun trait
+    /// antérieur modifié ; seul le dernier peut s'allonger). Sinon → repeinte.
+    private static func isExtension(of old: [BrushStroke], by new: [BrushStroke]) -> Bool {
+        guard new.count >= old.count else { return false }
+        guard let last = old.indices.last else { return true }  // rien de cuit
+        for i in 0..<last where new[i] != old[i] { return false }
+        let o = old[last], n = new[last]
+        guard o.radius == n.radius, o.softness == n.softness, o.camera == n.camera,
+              n.points.count >= o.points.count else { return false }
+        return Array(n.points.prefix(o.points.count)) == o.points
+    }
+
+    /// Stampe les points d'un trait via sa pose caméra, plafonné par `maxDabs`.
+    private func stampStroke(_ stroke: BrushStroke, points: ArraySlice<SIMD2<Float>>,
+                             boxMin: SIMD3<Float>, boxSize: SIMD3<Float>, center: SIMD3<Float>) {
+        guard !points.isEmpty, stampedDabCount < Renderer.maxDabs else { return }
+        let capped = points.prefix(Renderer.maxDabs - stampedDabCount)
+        let dabs = capped.map { Dab(center: $0, radius: stroke.radius, softness: stroke.softness) }
+        let cam = stroke.camera
+        var uniforms = StampUniforms(
+            boxMin: SIMD4(boxMin.x, boxMin.y, boxMin.z, 0),
+            boxSize: SIMD4(boxSize.x, boxSize.y, boxSize.z, 0),
+            boxCenter: SIMD4(center.x, center.y, center.z, 0),
+            camRight: SIMD4(cam.right.x, cam.right.y, cam.right.z, 0),
+            camUp: SIMD4(cam.up.x, cam.up.y, cam.up.z, 0),
+            camForward: SIMD4(cam.forward.x, cam.forward.y, cam.forward.z, 0),
+            params: SIMD4(cam.tanHalfFov, cam.aspect, Renderer.stampDepthSigma, 0))
+        stampDabs(dabs, uniforms: &uniforms)
+        stampedDabCount += dabs.count
+    }
+
     /// Stampe les dabs fournis (max-combine avec l'existant) en ping-pong : lit
     /// le volume courant, écrit l'autre, puis bascule. Buffer neuf par appel.
-    private func stampDabs(_ dabs: [Dab], aspect: Float) {
-        let count = min(dabs.count, Renderer.maxDabs)
+    private func stampDabs(_ dabs: [Dab], uniforms: inout StampUniforms) {
+        let count = dabs.count
         guard count > 0 else { return }
         let stride = MemoryLayout<Dab>.stride
         guard let dabBuffer = device.makeBuffer(length: count * stride, options: .storageModeShared) else {
@@ -664,13 +779,12 @@ final class Renderer: NSObject, MTKViewDelegate {
             return
         }
         var dabCount = UInt32(count)
-        var aspectValue = aspect
         encoder.setComputePipelineState(stampPipeline)
         encoder.setTexture(source, index: 0)
         encoder.setTexture(destination, index: 1)
         encoder.setBuffer(dabBuffer, offset: 0, index: 0)
         encoder.setBytes(&dabCount, length: MemoryLayout<UInt32>.stride, index: 1)
-        encoder.setBytes(&aspectValue, length: MemoryLayout<Float>.stride, index: 2)
+        encoder.setBytes(&uniforms, length: MemoryLayout<StampUniforms>.stride, index: 2)
         encoder.dispatchThreads(volumeGrid, threadsPerThreadgroup: volumeThreads)
         encoder.endEncoding()
         commandBuffer.commit()

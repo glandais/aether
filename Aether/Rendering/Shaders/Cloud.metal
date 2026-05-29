@@ -21,12 +21,19 @@ struct CloudUniforms {
     float4 camera;          // x: tan(vertical FOV / 2) — matches the photo's zoom
     float4 lightSun;        // xyz: sun colour × intensity (by altitude & exposure)
     float4 lightAmbient;    // xyz: sky ambient fill
+    // Camera→world basis of the gaze (yaw + pitch), shared with the sky pass.
+    // The view ray is reconstructed from these so the world-fixed cloud box can
+    // be looked around / orbited; at the identity basis it faces North (-Z).
+    float4 camRight;
+    float4 camUp;
+    float4 camForward;
 };
 
 // Temporal amortization (step 7): each frame raymarches only the half-res
 // pixels whose 2×2 cell index matches `activeIndex`; the rest reuse history.
 struct CloudTemporal {
     uint activeIndex;       // 0…3, cycles over frames
+    uint cameraMoving;      // 1 while the gaze rotates/zooms → raymarch all pixels
 };
 
 struct CloudInOut {
@@ -145,18 +152,24 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
                                texture3d<float> noise [[texture(1)]],
                                texture2d<float, access::read> history [[texture(2)]]) {
     // Temporal amortization: only the active 2×2 cell is raymarched this frame;
-    // the others reuse the previous frame (camera is fixed → same pixel).
+    // the others reuse the previous frame — valid only while the camera is
+    // still (same pixel = same ray). While the gaze moves the ray under each
+    // pixel changes every frame, so reusing history would smear; raymarch all.
     uint2 px = uint2(in.position.xy);
     uint cellIndex = (px.y & 1) * 2 + (px.x & 1);
-    if (cellIndex != temporal.activeIndex) {
+    if (temporal.cameraMoving == 0 && cellIndex != temporal.activeIndex) {
         return history.read(px);
     }
 
-    // Pinhole camera at the origin looking down -Z, with the photo's vertical
-    // FOV (zoom). `ndc.x` scaled by aspect for square pixels.
-    float2 ndc = float2(in.ndc.x * u.aspect, in.ndc.y);
+    // Reconstruct the world-space view ray from the camera→world basis (mirror
+    // of `sky_background_fragment`), so the world-fixed cloud box can be looked
+    // around. `in.ndc` is already clip-space (+Y up) from `cloud_vertex`.
+    float2 ndc = in.ndc;
     float3 ro = float3(0.0f, 0.0f, 0.0f);
-    float3 rd = normalize(float3(ndc * u.camera.x, -1.0f));
+    float3 rd = normalize(
+        ndc.x * u.camera.x * u.aspect * u.camRight.xyz +
+        ndc.y * u.camera.x * u.camUp.xyz +
+        u.camForward.xyz);
 
     float3 boxMin = u.volumeCenter.xyz - u.volumeHalfSize.xyz;
     float3 boxMax = u.volumeCenter.xyz + u.volumeHalfSize.xyz;
