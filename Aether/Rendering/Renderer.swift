@@ -234,12 +234,18 @@ final class Renderer: NSObject, MTKViewDelegate {
     // Profondeur (distance œil → centre du volume), pour l'ancrage en monde.
     private static let volumeDistance: Float = 5.0
     // Demi-extents **monde** figés du volume (boîte à position réelle, ne suit
-    // plus le regard ni le FOV courant). La hauteur cale le cadrage d'origine
-    // sur le FOV de base de la scène ; la largeur reprend l'aspect au chargement
-    // (cadrage identique au démarrage) ; la profondeur donne une épaisseur
-    // lisible quand on orbite autour du nuage. Calculés une fois (premier draw).
+    // plus le regard ni le FOV courant). « Bande de ciel » : largeur cadrée sur
+    // l'aspect au chargement (le nuage occupe la largeur du cadre), hauteur
+    // **aplatie** (`volumeHeightFactor`) pour un nuage lointain plutôt qu'une
+    // masse proche, profondeur pour l'épaisseur quand on orbite. Calculés une
+    // fois (premier draw).
     private static let baseTanHalfFov = Float(tan(Scene.defaultFieldOfView / 2))
-    private static let volumeHalfDepth: Float = 1.8
+    private static let volumeHeightFactor: Float = 0.42
+    private static let volumeHalfDepth: Float = 1.3
+    // Soulèvement du centre : la base du volume reste au-dessus de l'horizon
+    // (jamais dans la mer), avec ce dégagement de ciel sous le nuage (unités
+    // monde, à la profondeur du volume).
+    private static let volumeSkyGap: Float = 0.55
     private var volumeHalfExtents: SIMD3<Float>?
 
     // Résolution du volume de densité peint. La forme y est lisse (le détail
@@ -501,14 +507,21 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         // Boîte de nuage à **position réelle** en monde : centre ancré le long de
         // l'avant de base de la scène (indépendant du regard courant), demi-extents
-        // figés une fois (cadrage d'origine préservé via l'aspect au chargement).
+        // figés une fois (bande de ciel : largeur cadrée, hauteur aplatie).
         let halfExtents = volumeHalfExtents ?? {
-            let halfH = Renderer.volumeDistance * Renderer.baseTanHalfFov
-            let extents = SIMD3<Float>(halfH * aspect, halfH, Renderer.volumeHalfDepth)
+            let frameHalf = Renderer.volumeDistance * Renderer.baseTanHalfFov
+            let extents = SIMD3<Float>(
+                frameHalf * aspect,
+                frameHalf * Renderer.volumeHeightFactor,
+                Renderer.volumeHalfDepth)
             volumeHalfExtents = extents
             return extents
         }()
-        let volumeCenter = baseForward * Renderer.volumeDistance  // œil à l'origine
+        // Centre dans l'azimut/tangage de base, **soulevé** pour que la base du
+        // volume reste au-dessus de l'horizon (jamais dans la mer), quel que soit
+        // le tangage de la scène. L'œil est à l'origine, l'horizon à Y = 0.
+        var volumeCenter = baseForward * Renderer.volumeDistance
+        volumeCenter.y = max(volumeCenter.y, halfExtents.y + Renderer.volumeSkyGap)
 
         // Réconcilie le volume peint avec les traits courants (la boîte monde est
         // maintenant connue) : delta incrémental, ou repeinte intégrale sur
