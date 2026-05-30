@@ -1,0 +1,9 @@
+# Configuration Periphery — détection de code mort.
+# Lancé par scripts/verify.sh. Voir https://github.com/peripheryapp/periphery
+project: Aether.xcodeproj
+schemes:
+  - Aether
+# Les structures « miroir » des uniformes Metal (Renderer.swift) sont remplies
+# côté CPU puis recopiées telles quelles dans un MTLBuffer : Periphery voit
+# l'affectation mais pas la lecture (faite par le GPU). On les conserve.
+retain_assign_only_properties: true

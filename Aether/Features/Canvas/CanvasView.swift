@@ -108,9 +108,11 @@ struct CanvasView: View {
     private static let baseHoursPerSecond = 0.25
     private static let autoPlaySpeeds = [1, 2, 4, 8, 16]
 
-    private let astro = SwiftAAAstroService()
+    // Dépendances exposées via leur protocole (cf. CLAUDE.md : SwiftAA / tzf
+    // cachés derrière une abstraction pour la testabilité).
+    private let astro: AstroService = SwiftAAAstroService()
     private let atmosphere = Atmosphere.earth
-    private let timeZoneService = TzfTimeZoneService()
+    private let timeZoneService: TimeZoneService = TzfTimeZoneService()
     private let locationService = CoreLocationService()
 
     // Échelles ramenant la radiance atmosphérique dans la plage de travail du
@@ -975,6 +977,6 @@ struct CanvasView: View {
 private extension SIMD2<Float> {
     /// Confine le point au canvas [0,1]² (un drag peut sortir des bords).
     func clamped() -> SIMD2<Float> {
-        SIMD2(min(max(x, 0), 1), min(max(y, 0), 1))
+        simd_clamp(self, .zero, .one)
     }
 }

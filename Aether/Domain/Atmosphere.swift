@@ -11,7 +11,7 @@ import simd
 ///   → halo blanchâtre serré autour du soleil.
 ///
 /// Type pur Domain (ne dépend de rien). Le `Renderer` le transmet au shader de
-/// fond en uniformes, exactement comme `Lighting` / `CloudParameters`.
+/// fond en uniformes, exactement comme `CloudParameters`.
 /// Longueurs en mètres, coefficients de diffusion en m⁻¹.
 struct Atmosphere: Equatable {
     /// Coefficient de diffusion de Rayleigh par composante (R, G, B), m⁻¹.

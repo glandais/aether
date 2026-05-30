@@ -79,6 +79,15 @@ interaction : pour vérifier le rendu d'un paysage/nuage donné, injecter
 temporairement un `SceneContext` (ou un trait pré-peint dans `CanvasModel`),
 capturer, **puis retirer le code temporaire**.
 
+### Contrôle qualité statique
+
+Après toute modification de code, lancer `scripts/verify.sh` : il régénère le
+projet (XcodeGen) puis enchaîne **SwiftLint** (`--strict`, config
+`.swiftlint.yml`), **`xcodebuild analyze`** (analyseur du compilateur) et
+**Periphery** (code mort, config `.periphery.yml`). Le script échoue au premier
+avertissement ; il doit rester vert. Outils à installer via Homebrew (hors du
+script) : `brew install swiftlint periphery`.
+
 ### Pièges connus
 
 - Le Domain définit un type `Scene`, qui masque `SwiftUI.Scene`. Dans
@@ -98,7 +107,7 @@ capturer, **puis retirer le code temporaire**.
 | `Aether/App/` | entry point SwiftUI, navigation racine | Features |
 | `Aether/Features/` | modules SwiftUI par feature (Canvas, Gallery, Settings) | Domain, Services |
 | `Aether/Rendering/` | pipeline Metal, shaders, volume textures | Domain **uniquement** |
-| `Aether/Domain/` | modèles purs (`Scene`, `CloudCube`, `BrushStroke`, `Lighting`, `WeatherSnapshot`, `CelestialPosition`) | **rien** |
+| `Aether/Domain/` | modèles purs (`Scene`, `CloudCube`, `BrushStroke`, `WeatherSnapshot`, `CelestialPosition`) | **rien** |
 | `Aether/Services/` | `AstroService`, `LocationService` (protocoles + impl) | Domain |
 | `Aether/Resources/` | assets, paysages curés | — |
 

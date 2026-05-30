@@ -237,7 +237,7 @@ Vérifié au simulateur : midi → ciel bleu, coucher → rougeoiement bas-horiz
 - **`Domain/Atmosphere.swift`** : type pur (Rayleigh/Mie : coefficients, hauteurs
   d'échelle, anisotropie `g`, rayons planète/atmosphère, hauteur d'œil,
   intensité). Défaut `Atmosphere.earth` (valeurs terrestres Bruneton/Hillaire).
-  Voyage Feature → `Renderer` en uniformes, comme `Lighting`/`CloudParameters`.
+  Voyage Feature → `Renderer` en uniformes, comme `CloudParameters`.
 - **`Rendering/Shaders/Background.metal`** : `sky_background_fragment` reconstruit
   un rayon de vue monde par pixel (même convention que `Cloud.metal` : -Z = Nord,
   +X = Est, +Y = haut, FOV via `tanHalfFov` + aspect), puis intègre la diffusion

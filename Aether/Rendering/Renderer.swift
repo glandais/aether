@@ -293,6 +293,9 @@ final class Renderer: NSObject, MTKViewDelegate {
     }
     private var bakes: [CubeBake] = []
 
+    // Créé depuis `MetalView` (UIViewRepresentable, @MainActor) ; l'init touche
+    // les propriétés main-actor de `MTKView` (device, colorPixelFormat).
+    @MainActor
     init?(view: MTKView) {
         guard let device = view.device ?? MTLCreateSystemDefaultDevice(),
               let queue = device.makeCommandQueue(),

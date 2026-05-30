@@ -76,12 +76,13 @@ struct StarCatalogTests {
     @Test("Le décodage binaire reconstruit les enregistrements float32 LE")
     func decodeRoundTrip() {
         var data = Data()
-        let values: [(Float, Float, Float, Float)] = [
-            (0.0225, 0.7894, 6.70, 0.07),  // ~ HR 1
-            (1.5, -0.3, 2.1, 1.2)
+        // Chaque enregistrement = 4 float32 LE (ra, dec, vmag, bv).
+        let records: [[Float]] = [
+            [0.0225, 0.7894, 6.70, 0.07],  // ~ HR 1
+            [1.5, -0.3, 2.1, 1.2]
         ]
-        for (ra, dec, vmag, bv) in values {
-            for f in [ra, dec, vmag, bv] {
+        for record in records {
+            for f in record {
                 var le = f.bitPattern.littleEndian
                 withUnsafeBytes(of: &le) { data.append(contentsOf: $0) }
             }
