@@ -15,19 +15,31 @@ struct CloudUniforms {
     float  time;
     float  aspect;
     float4 sunDirection;    // xyz: normalized direction TOWARD the sun
-    float4 volumeCenter;    // xyz: world-space center of the density volume
-    float4 volumeHalfSize;  // xyz: world-space half-extents of the volume AABB
     float4 weather;         // x: coverage bias, y: density scale (from weather)
     float4 camera;          // x: tan(vertical FOV / 2) — matches the photo's zoom
     float4 lightSun;        // xyz: sun colour × intensity (by altitude & exposure)
     float4 lightAmbient;    // xyz: sky ambient fill
     // Camera→world basis of the gaze (yaw + pitch), shared with the sky pass.
-    // The view ray is reconstructed from these so the world-fixed cloud box can
+    // The view ray is reconstructed from these so the world-fixed cloud boxes can
     // be looked around / orbited; at the identity basis it faces North (-Z).
     float4 camRight;
     float4 camUp;
     float4 camForward;
+    uint   cubeCount;       // number of valid entries in the `cubes` buffer
+    uint   atlasSlabs;      // total slabs stacked in the density atlas (= CloudCube.maxCount)
 };
+
+// One cloud cube: its world AABB. Mirrors `CloudCubeGPU` in Renderer.swift. Its
+// painted density lives in slab `i` of the atlas (depth [i·48, (i+1)·48)).
+struct CloudCubeGPU {
+    float4 center;          // xyz: world-space center of the cube
+    float4 halfSize;        // xyz: world-space half-extents of the cube AABB
+};
+
+// Capacity ceiling for the per-ray hit arrays in `cloud_fragment` (a compile-time
+// array bound, NOT the cube count — that comes from `u.atlasSlabs`). Only needs to
+// be ≥ CloudCube.maxCount; the gather clamps to it.
+#define kMaxCubeHits 16
 
 // Temporal amortization (step 7): each frame raymarches only the half-res
 // pixels whose 2×2 cell index matches `activeIndex`; the rest reuse history.
@@ -81,14 +93,18 @@ static inline float powder(float density) {
 
 // Density at world point `p`: painted shape from `shape`, detailed by `noise`.
 // `coverageBias` (from the weather) fills out or erodes the painted silhouette.
+// `cubeIndex` selects the cube's slab in the density atlas: the local depth
+// `uvw.z` is remapped into slab `cubeIndex` of `slabCount`.
 static inline float cloudDensity(float3 p, float time, float coverageBias,
                                  texture3d<float> shape, texture3d<float> noise,
-                                 float3 boxMin, float3 boxSize) {
+                                 float3 boxMin, float3 boxSize, int cubeIndex, int slabCount) {
     float3 uvw = (p - boxMin) / boxSize;
     if (any(uvw < 0.0f) || any(uvw > 1.0f)) {
         return 0.0f;
     }
-    float painted = saturate(shape.sample(shapeSampler, uvw).r + coverageBias);
+    // Address this cube's slab in the stacked atlas.
+    float3 atlasUVW = float3(uvw.xy, (float(cubeIndex) + uvw.z) / float(slabCount));
+    float painted = saturate(shape.sample(shapeSampler, atlasUVW).r + coverageBias);
     if (painted <= 0.001f) {
         return 0.0f;
     }
@@ -119,11 +135,11 @@ static inline float cloudDensity(float3 p, float time, float coverageBias,
 // the multiple-scattering octaves below.
 static inline float lightOpticalDepth(float3 p, float3 sunDir, float time, float coverageBias,
                                       texture3d<float> shape, texture3d<float> noise,
-                                      float3 boxMin, float3 boxSize) {
+                                      float3 boxMin, float3 boxSize, int cubeIndex, int slabCount) {
     float opticalDepth = 0.0f;
     for (int i = 0; i < kLightSteps; ++i) {
         float3 q = p + sunDir * (float(i) + 0.5f) * kLightStep;
-        opticalDepth += cloudDensity(q, time, coverageBias, shape, noise, boxMin, boxSize) * kLightStep;
+        opticalDepth += cloudDensity(q, time, coverageBias, shape, noise, boxMin, boxSize, cubeIndex, slabCount) * kLightStep;
     }
     return opticalDepth;
 }
@@ -158,6 +174,7 @@ vertex CloudInOut cloud_vertex(uint vertexID [[vertex_id]]) {
 fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
                                constant CloudUniforms &u [[buffer(0)]],
                                constant CloudTemporal &temporal [[buffer(1)]],
+                               constant CloudCubeGPU *cubes [[buffer(2)]],
                                texture3d<float> shape [[texture(0)]],
                                texture3d<float> noise [[texture(1)]],
                                texture2d<float, access::read> history [[texture(2)]]) {
@@ -172,7 +189,7 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
     }
 
     // Reconstruct the world-space view ray from the camera→world basis (mirror
-    // of `sky_background_fragment`), so the world-fixed cloud box can be looked
+    // of `sky_background_fragment`), so the world-fixed cloud boxes can be looked
     // around. `in.ndc` is already clip-space (+Y up) from `cloud_vertex`.
     float2 ndc = in.ndc;
     float3 ro = float3(0.0f, 0.0f, 0.0f);
@@ -181,20 +198,52 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
         ndc.y * u.camera.x * u.camUp.xyz +
         u.camForward.xyz);
 
-    float3 boxMin = u.volumeCenter.xyz - u.volumeHalfSize.xyz;
-    float3 boxMax = u.volumeCenter.xyz + u.volumeHalfSize.xyz;
-    float3 boxSize = boxMax - boxMin;
-
-    float2 hit = intersectBox(ro, rd, boxMin, boxMax);
-    float tNear = max(hit.x, 0.0f);
-    float tFar = hit.y;
-
-    if (tFar <= tNear) {
-        // Ray misses the volume.
-        return float4(0.0f);
+    // Gather the cubes this ray crosses (near/far t + cube index).
+    int n = min(int(u.cubeCount), kMaxCubeHits);
+    int slabCount = int(u.atlasSlabs);
+    float hitNear[kMaxCubeHits];
+    float hitFar[kMaxCubeHits];
+    int   hitIdx[kMaxCubeHits];
+    int   hitCount = 0;
+    float totalLen = 0.0f;
+    for (int i = 0; i < n; ++i) {
+        float3 c = cubes[i].center.xyz;
+        float3 h = cubes[i].halfSize.xyz;
+        float2 hit = intersectBox(ro, rd, c - h, c + h);
+        float tn = max(hit.x, 0.0f);
+        float tf = hit.y;
+        if (tf > tn) {
+            hitNear[hitCount] = tn;
+            hitFar[hitCount] = tf;
+            hitIdx[hitCount] = i;
+            totalLen += (tf - tn);
+            hitCount++;
+        }
+    }
+    if (hitCount == 0) {
+        return float4(0.0f);  // ray misses every cube
     }
 
-    float stepSize = (tFar - tNear) / float(kViewSteps);
+    // Sort the hit segments by near distance (insertion sort, ≤ kMaxCubeHits) so we
+    // composite strictly front-to-back across cubes.
+    for (int i = 1; i < hitCount; ++i) {
+        float kn = hitNear[i], kf = hitFar[i];
+        int ki = hitIdx[i];
+        int j = i - 1;
+        while (j >= 0 && hitNear[j] > kn) {
+            hitNear[j + 1] = hitNear[j];
+            hitFar[j + 1] = hitFar[j];
+            hitIdx[j + 1] = hitIdx[j];
+            j--;
+        }
+        hitNear[j + 1] = kn;
+        hitFar[j + 1] = kf;
+        hitIdx[j + 1] = ki;
+    }
+
+    // Global step budget: one uniform step size shared across every hit segment,
+    // so the total marched steps stay near kViewSteps regardless of cube count.
+    float stepSize = max(totalLen / float(kViewSteps), 1.0e-4f);
     float3 sunDir = normalize(u.sunDirection.xyz);
 
     // Scene-aware lighting: sun colour/intensity by altitude × the photo's
@@ -212,39 +261,59 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
     float transmittance = 1.0f;
     float3 scattered = float3(0.0f);
 
-    for (int i = 0; i < kViewSteps; ++i) {
-        float t = tNear + (float(i) + 0.5f) * stepSize;
-        float3 p = ro + rd * t;
+    // March each cube segment in turn, front-to-back, carrying transmittance and
+    // in-scatter across cubes (overlap is fine: each cube contributes its slab).
+    for (int s = 0; s < hitCount; ++s) {
+        int ci = hitIdx[s];
+        float3 c = cubes[ci].center.xyz;
+        float3 h = cubes[ci].halfSize.xyz;
+        float3 boxMin = c - h;
+        float3 boxSize = h * 2.0f;
+        float tn = hitNear[s];
+        float tf = hitFar[s];
+        int steps = min(int(ceil((tf - tn) / stepSize)), kViewSteps);
 
-        float density = cloudDensity(p, u.time, coverageBias, shape, noise, boxMin, boxSize);
-        if (density > 0.001f) {
-            float opticalDepth = lightOpticalDepth(p, sunDir, u.time, coverageBias, shape, noise, boxMin, boxSize);
-
-            // Multiple-scattering approximation (Hillaire / Wrenninge octaves):
-            // each octave lets light penetrate deeper (lower extinction) with a
-            // smaller, more isotropic contribution — so backlit clouds glow.
-            float3 sunLight = float3(0.0f);
-            float attenuation = 1.0f;
-            float weight = 1.0f;
-            float gScale = 1.0f;
-            for (int o = 0; o < kScatterOctaves; ++o) {
-                float beer = exp(-opticalDepth * sigma * attenuation);
-                sunLight += weight * beer * dualPhase(cosTheta, gScale);
-                attenuation *= 0.5f;
-                weight *= 0.55f;
-                gScale *= 0.5f;
+        for (int i = 0; i < steps; ++i) {
+            float t = tn + (float(i) + 0.5f) * stepSize;
+            if (t > tf) {
+                break;
             }
-            sunLight *= sunColor * powder(density);
+            float3 p = ro + rd * t;
 
-            float3 luminance = sunLight + skyAmbient;
-            float extinction = density * sigma * stepSize;
-            // In-scattered radiance integrated against current transmittance.
-            scattered += transmittance * luminance * extinction;
-            transmittance *= exp(-extinction);
+            float density = cloudDensity(p, u.time, coverageBias, shape, noise, boxMin, boxSize, ci, slabCount);
+            if (density > 0.001f) {
+                float opticalDepth = lightOpticalDepth(
+                    p, sunDir, u.time, coverageBias, shape, noise, boxMin, boxSize, ci, slabCount);
 
-            if (transmittance < 0.01f) {
-                break;  // early-out: the cloud is opaque from here on
+                // Multiple-scattering approximation (Hillaire / Wrenninge octaves):
+                // each octave lets light penetrate deeper (lower extinction) with a
+                // smaller, more isotropic contribution — so backlit clouds glow.
+                float3 sunLight = float3(0.0f);
+                float attenuation = 1.0f;
+                float weight = 1.0f;
+                float gScale = 1.0f;
+                for (int o = 0; o < kScatterOctaves; ++o) {
+                    float beer = exp(-opticalDepth * sigma * attenuation);
+                    sunLight += weight * beer * dualPhase(cosTheta, gScale);
+                    attenuation *= 0.5f;
+                    weight *= 0.55f;
+                    gScale *= 0.5f;
+                }
+                sunLight *= sunColor * powder(density);
+
+                float3 luminance = sunLight + skyAmbient;
+                float extinction = density * sigma * stepSize;
+                // In-scattered radiance integrated against current transmittance.
+                scattered += transmittance * luminance * extinction;
+                transmittance *= exp(-extinction);
+
+                if (transmittance < 0.01f) {
+                    break;  // early-out: the cloud is opaque from here on
+                }
             }
+        }
+        if (transmittance < 0.01f) {
+            break;  // opaque: no farther cube can contribute
         }
     }
 

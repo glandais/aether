@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 import simd
 @testable import Aether
 
@@ -81,5 +82,62 @@ struct CanvasModelTests {
 
         model.setRotation(yaw: -8, pitch: -5)
         #expect(model.viewPitch > -1.5)
+    }
+
+    // MARK: - Cubes multiples (un cube par état caméra)
+
+    /// Caméra de test orientée par un lacet `angle` (radians) autour de l'axe Y.
+    private static func camera(yaw angle: Float) -> StrokeCamera {
+        StrokeCamera(
+            right: SIMD3(cos(angle), 0, sin(angle)), up: SIMD3(0, 1, 0),
+            forward: SIMD3(sin(angle), 0, -cos(angle)),
+            tanHalfFov: 0.5, aspect: 1)
+    }
+
+    @Test("Peindre sans changer de regard reste dans un seul cube")
+    func sameViewKeepsSingleCube() {
+        let model = CanvasModel()
+        model.beginStroke(at: SIMD2(0.5, 0.5), camera: Self.testCamera)
+        model.endStroke()
+        model.beginStroke(at: SIMD2(0.2, 0.2), camera: Self.testCamera)
+        model.endStroke()
+        #expect(model.cubes.count == 1)
+        #expect(model.cubes.first?.strokes.count == 2)
+    }
+
+    @Test("Changer de regard ouvre un nouveau cube ancré sur ce regard")
+    func changedViewOpensNewCube() {
+        let model = CanvasModel()
+        model.beginStroke(at: SIMD2(0.5, 0.5), camera: Self.camera(yaw: 0))
+        model.endStroke()
+        model.beginStroke(at: SIMD2(0.5, 0.5), camera: Self.camera(yaw: 1))
+        model.endStroke()
+        #expect(model.cubes.count == 2)
+        #expect(model.cubes.last?.anchorForward == Self.camera(yaw: 1).forward)
+    }
+
+    @Test("Annuler un trait qui a créé un cube retire ce cube")
+    func undoRemovesNewCube() {
+        let model = CanvasModel()
+        model.beginStroke(at: SIMD2(0.5, 0.5), camera: Self.camera(yaw: 0))
+        model.endStroke()
+        model.beginStroke(at: SIMD2(0.5, 0.5), camera: Self.camera(yaw: 1))
+        model.endStroke()
+        #expect(model.cubes.count == 2)
+
+        model.undo()
+        #expect(model.cubes.count == 1)
+        #expect(model.cubes.first?.anchorForward == Self.camera(yaw: 0).forward)
+    }
+
+    @Test("Au plafond, un nouveau regard reste dans le cube courant")
+    func capKeepsCurrentCube() {
+        let model = CanvasModel()
+        for i in 0...CloudCube.maxCount {  // maxCubes + 1 regards distincts
+            model.beginStroke(at: SIMD2(0.5, 0.5), camera: Self.camera(yaw: Float(i) * 0.2))
+            model.endStroke()
+        }
+        #expect(model.cubes.count == CloudCube.maxCount)
+        #expect(model.cubes.last?.strokes.count == 2)  // le dernier regard s'y est replié
     }
 }

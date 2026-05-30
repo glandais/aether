@@ -474,20 +474,13 @@ struct CanvasView: View {
             pitch: context.scene.pitch + Double(model.viewPitch))
     }
 
-    /// Avant de base de la scène (cap + tangage du paysage, **sans** le regard
-    /// utilisateur) : ancre le volume de nuage à position réelle en monde, donc
-    /// indépendant des angles de caméra courants.
-    private var baseForward: SIMD3<Float> {
-        CameraPose(heading: context.scene.heading, pitch: context.scene.pitch).basis.forward
-    }
-
     // MARK: - Vues
 
     @ViewBuilder
     private func canvas(light: ResolvedLight) -> some View {
         let basis = cameraPose.basis
         let metalView = MetalView(
-            strokes: model.strokes,
+            cubes: model.cubes,
             sunDirection: light.direction,
             skySunDirection: light.skySunDirection,
             sunDiscColor: light.sunDiscColor,
@@ -509,7 +502,6 @@ struct CanvasView: View {
             cameraRight: basis.right,
             cameraUp: basis.up,
             cameraForward: basis.forward,
-            baseForward: baseForward,
             landscape: context.landscape,
             contentID: context.id
         )

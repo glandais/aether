@@ -7,7 +7,7 @@ import SwiftUI
 /// (ré)appliqué que lorsque le contenu change (`contentID`) ; les traits, le
 /// soleil et la météo sont poussés à chaque mise à jour.
 struct MetalView: UIViewRepresentable {
-    var strokes: [BrushStroke]
+    var cubes: [CloudCube]
     var sunDirection: SIMD3<Float>
     var skySunDirection: SIMD3<Float>
     /// Couleurs des disques solaire/lunaire dessinés dans le ciel (la position de
@@ -36,9 +36,6 @@ struct MetalView: UIViewRepresentable {
     var cameraRight: SIMD3<Float>
     var cameraUp: SIMD3<Float>
     var cameraForward: SIMD3<Float>
-    /// Avant de base de la scène (cap + tangage du paysage, sans le regard
-    /// utilisateur) : ancre le volume de nuage à position réelle en monde.
-    var baseForward: SIMD3<Float>
     var landscape: CGImage
     var contentID: UUID
 
@@ -77,8 +74,7 @@ struct MetalView: UIViewRepresentable {
         renderer.updateStars(stars, revision: starRevision)
         renderer.updateFieldOfView(cameraTanHalfFov)
         renderer.updateCameraBasis(right: cameraRight, up: cameraUp, forward: cameraForward)
-        renderer.updateBaseForward(baseForward)
-        renderer.updateStrokes(strokes)
+        renderer.updateCubes(cubes)
     }
 
     @MainActor

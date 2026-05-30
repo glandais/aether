@@ -26,6 +26,9 @@ struct Dab {
 };
 
 // World box + paint-time camera pose. Mirrors `StampUniforms` in Renderer.swift.
+// The density texture is an ATLAS: `CloudCube.maxCount` slabs of `slab.y` voxels stacked in
+// depth, one per cloud cube. A stamp writes one slab (`slab.x`) and copies the
+// rest through, so the ping-pong flip keeps every other cube intact.
 struct StampUniforms {
     float4 boxMin;     // xyz: world AABB min corner
     float4 boxSize;    // xyz: world AABB size
@@ -34,6 +37,7 @@ struct StampUniforms {
     float4 camUp;
     float4 camForward;
     float4 params;     // x: tan(FOV/2), y: aspect, z: depth sigma (world units)
+    float4 slab;       // x: target slab index, y: slab depth (voxels)
 };
 
 kernel void stamp_density_volume(texture3d<float, access::read> src [[texture(0)]],
@@ -47,8 +51,21 @@ kernel void stamp_density_volume(texture3d<float, access::read> src [[texture(0)
         return;
     }
 
-    // World position of this voxel within the AABB.
-    float3 uvw = (float3(gid) + 0.5f) / float3(dims);
+    // Carry the existing density forward. Voxels outside the target slab are just
+    // copied (they belong to other cubes) — this keeps them across the ping-pong.
+    float existing = src.read(gid).r;
+    uint slabDepth = uint(U.slab.y);
+    uint slabBase = uint(U.slab.x) * slabDepth;
+    if (gid.z < slabBase || gid.z >= slabBase + slabDepth) {
+        dst.write(float4(existing), gid);
+        return;
+    }
+
+    // World position of this voxel within the cube's AABB. The cube occupies one
+    // slab, so normalize against the slab (local z), not the whole atlas.
+    uint3 local = uint3(gid.x, gid.y, gid.z - slabBase);
+    float3 sdims = float3(float(dims.x), float(dims.y), float(slabDepth));
+    float3 uvw = (float3(local) + 0.5f) / sdims;
     float3 p = U.boxMin.xyz + uvw * U.boxSize.xyz;
 
     // Project into the paint-time camera (eye at the origin). `forward` is the
@@ -88,8 +105,7 @@ kernel void stamp_density_volume(texture3d<float, access::read> src [[texture(0)
         }
     }
 
-    // Carry the existing density forward, max-combined with the new dabs.
-    float existing = src.read(gid).r;
+    // Max-combine the new dabs with the existing density in this slab.
     dst.write(float4(max(existing, coverage * depthProfile)), gid);
 }
 
