@@ -12,7 +12,7 @@ import simd
 ///
 /// Registre éditorial **contemplatif** : `.calm` privilégie une houle lente et
 /// peu hachée (`choppy`/`speed` atténués par rapport au shader d'origine).
-struct SeaSurface: Equatable, Sendable {
+struct SeaSurface: Equatable, Sendable, Codable {
     /// La mer est-elle rendue pour ce paysage ?
     var enabled: Bool
     /// Hauteur de l'œil au-dessus du plan de mer, m → plan en `y = -level`.

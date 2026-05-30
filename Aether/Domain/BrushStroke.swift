@@ -5,7 +5,7 @@ import simd
 /// monde, le Rendering projette chaque trait dans le volume via cette pose : un
 /// trait peint sous un angle donné s'y dépose correctement, et reste en place
 /// quand on tourne ensuite le regard. Convention partagée avec `CameraPose`.
-struct StrokeCamera: Equatable, Sendable {
+struct StrokeCamera: Equatable, Sendable, Codable {
     var right: SIMD3<Float>
     var up: SIMD3<Float>
     var forward: SIMD3<Float>
@@ -18,7 +18,7 @@ struct StrokeCamera: Equatable, Sendable {
 
 /// Un trait de pinceau dans le canvas 2D normalisé ([0,1]²).
 /// Converti en champ de densité par le Rendering (étape 4).
-struct BrushStroke: Equatable, Sendable {
+struct BrushStroke: Equatable, Sendable, Codable {
     var points: [SIMD2<Float>]
     /// Rayon du pinceau, en coordonnées normalisées.
     var radius: Float

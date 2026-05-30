@@ -1,6 +1,6 @@
 /// Paramètres de rendu du nuage dérivés de la météo (étape 9). Type pur :
 /// la météo statique du paysage curé informe l'état initial du nuage peint.
-struct CloudParameters: Equatable, Sendable {
+struct CloudParameters: Equatable, Sendable, Codable {
     /// Biais de couverture ajouté à la silhouette peinte. Couvert → nuages plus
     /// pleins ; dégagé → plus clairsemés et érodés.
     var coverageBias: Float

@@ -110,6 +110,23 @@ final class CanvasModel {
         isDrawing = false
     }
 
+    /// Réamorce l'état depuis un fichier `.aether` rechargé : remplace les cubes
+    /// et l'orientation, réinitialise l'historique (pas d'annulation à travers un
+    /// chargement). Le tangage est reclampé par sécurité.
+    func load(
+        cubes: [CloudCube], viewYaw: Float, viewPitch: Float,
+        brushRadius: Float, brushSoftness: Float
+    ) {
+        self.cubes = cubes
+        self.viewYaw = viewYaw
+        self.viewPitch = min(max(viewPitch, -Self.maxPitch), Self.maxPitch)
+        self.brushRadius = brushRadius
+        self.brushSoftness = brushSoftness
+        isDrawing = false
+        undoStack.removeAll()
+        redoStack.removeAll()
+    }
+
     /// Oriente le regard. Le lacet est libre (panoramique) ; le tangage est
     /// clampé à ±`maxPitch` pour éviter la bascule.
     func setRotation(yaw: Float, pitch: Float) {

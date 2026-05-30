@@ -44,6 +44,9 @@ targets:
         PRODUCT_NAME: Aether
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: YES
+        # Plist partiel (type de document `.aether`) ; les clés générées y sont
+        # fusionnées au build (cf. INFOPLIST_KEY_* ci-dessous).
+        INFOPLIST_FILE: Aether/Resources/Info.plist
         # Lancement plein écran sans launch storyboard (étape 1).
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_CFBundleDisplayName: Aether

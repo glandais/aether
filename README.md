@@ -26,6 +26,8 @@ une poignée de gestes et de sliders.
   glint solaire et clair de lune.
 - **Regard libre** : pivoter la vue (1 doigt) et zoomer (pincement) ; le ciel et
   l'éclairage suivent.
+- **Enregistrer un ciel** : sauvegarder l'état complet (paysage, nuages, instant,
+  regard) dans un fichier `.aether` autonome, rouvrir plus tard à l'identique.
 
 ## Galerie curée
 
@@ -70,7 +72,9 @@ Swift 6 · SwiftUI · MetalKit (raymarching MSL) · SwiftAA (positions soleil/lu
 ## Documentation
 
 Vision, architecture en couches, pipeline de rendu, conventions et état
-d'avancement : [`CLAUDE.md`](./CLAUDE.md). Références algorithmiques (papers +
-code) : [`BIBLIO.md`](./BIBLIO.md).
+d'avancement : [`CLAUDE.md`](./CLAUDE.md). Pipeline de rendu détaillé :
+[`docs/PIPELINE.md`](./docs/PIPELINE.md). Persistance d'un ciel (`.aether`) :
+[`docs/PERSISTENCE.md`](./docs/PERSISTENCE.md). Références algorithmiques (papers
++ code) : [`BIBLIO.md`](./BIBLIO.md).
 </content>
 </invoke>

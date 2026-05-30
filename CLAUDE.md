@@ -144,12 +144,15 @@ IAP, analytics, crash reporting.
 
 **Distribution — App Store.** Pipeline de rendu complet plus galerie curée,
 éclairage selon la scène, météo statique, heure choisie + lune, fond de ciel
-atmosphérique, caméra à regard libre, mer raymarchée, et soleil / lune / étoiles
-dessinés dans le ciel — tout est implémenté et vérifié. Version courante :
+atmosphérique, caméra à regard libre, mer raymarchée, soleil / lune / étoiles
+dessinés dans le ciel, et persistance d'un ciel en fichier `.aether` — tout est
+implémenté et vérifié. Version courante :
 **`1.0.1` (build 2)**, bundle `io.github.glandais.aether` (`MARKETING_VERSION` /
 `CURRENT_PROJECT_VERSION` dans `project.yml`).
 
 - Détail du pipeline et des fonctionnalités : [`docs/PIPELINE.md`](docs/PIPELINE.md)
+- Persistance d'un ciel (`.aether` : enregistrer / rouvrir à l'identique) :
+  [`docs/PERSISTENCE.md`](docs/PERSISTENCE.md)
 - Distribution App Store / TestFlight (coordonnées ASC, flux release) :
   [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md)
 

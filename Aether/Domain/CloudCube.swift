@@ -13,7 +13,7 @@ import simd
 /// `anchorForward` = avant du regard (`CameraPose.basis.forward`, attitude scène
 /// + rotation utilisateur) au moment de la création. Source unique du placement
 /// monde du cube (le Rendering en dérive le centre : `anchorForward × distance`).
-struct CloudCube: Equatable, Sendable {
+struct CloudCube: Equatable, Sendable, Codable {
     var anchorForward: SIMD3<Float>
     var strokes: [BrushStroke]
 

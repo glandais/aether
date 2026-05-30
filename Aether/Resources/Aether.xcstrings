@@ -90,6 +90,24 @@
         }
       }
     },
+    "action.save" : {
+      "comment" : "Bouton enregistrant le ciel courant dans un fichier .aether.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enregistrer"
+          }
+        }
+      }
+    },
     "action.undo" : {
       "comment" : "Accessibilité : bouton annuler le dernier trait.",
       "extractionState" : "stale",
@@ -319,6 +337,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Éphéméride"
+          }
+        }
+      }
+    },
+    "gallery.open" : {
+      "comment" : "Bouton ouvrant un ciel enregistré (.aether) depuis la galerie.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open a sky"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ouvrir un ciel"
+          }
+        }
+      }
+    },
+    "gallery.openError" : {
+      "comment" : "Alerte : le fichier .aether choisi n'a pas pu être ouvert.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not open file"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fichier illisible"
           }
         }
       }

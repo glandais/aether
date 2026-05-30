@@ -2,7 +2,7 @@ import Foundation
 
 /// Une scène : un paysage choisi, ancré à un lieu et un instant.
 /// Type pur, sans logique — la résolution météo/astro vit dans les Services.
-struct Scene: Identifiable, Equatable, Sendable {
+struct Scene: Identifiable, Equatable, Sendable, Codable {
     let id: UUID
     var title: String
     /// Nom de l'asset du paysage curé, ou `nil` si photo personnelle importée.

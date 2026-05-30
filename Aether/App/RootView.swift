@@ -4,15 +4,22 @@ import SwiftUI
 /// canvas de peinture plein écran pour le paysage choisi.
 struct RootView: View {
     @State private var context: SceneContext?
+    /// État de canvas à réappliquer quand la scène vient d'un fichier `.aether`
+    /// rechargé ; `nil` pour un paysage curé neuf.
+    @State private var restored: RestoredCanvasState?
 
     var body: some View {
         ZStack {
             if let context {
-                CanvasView(context: context)
+                CanvasView(context: context, restored: restored)
+                    // Nouvelle scène (curée ou rechargée) = nouvelle identité :
+                    // `@State` réamorcé proprement, sans fuite de l'état précédent.
+                    .id(context.id)
                     .overlay(alignment: .topLeading) { backButton }
                     .transition(.opacity)
             } else {
-                GalleryView { selected in
+                GalleryView { selected, restoredState in
+                    restored = restoredState
                     context = selected
                 }
                 .transition(.opacity)

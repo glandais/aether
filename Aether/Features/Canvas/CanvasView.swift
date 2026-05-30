@@ -73,6 +73,28 @@ struct CanvasView: View {
     /// frame de rotation/zoom.
     @State private var starField: [VisibleStar] = []
     @State private var starRevision = 0
+    /// Document préparé pour l'export, et présentation du sélecteur de fichier.
+    @State private var saveDocument: AetherDocument?
+    @State private var showSaveExporter = false
+
+    /// Construit la vue, éventuellement réamorcée depuis un fichier `.aether`
+    /// rechargé : les traits, le regard, le pinceau et les surcharges
+    /// (heure/jour/lieu/fuseau/FOV) sont appliqués d'emblée, sans frame transitoire.
+    init(context: SceneContext, restored: RestoredCanvasState? = nil) {
+        self.context = context
+        let model = CanvasModel()
+        if let restored {
+            model.load(
+                cubes: restored.cubes, viewYaw: restored.viewYaw, viewPitch: restored.viewPitch,
+                brushRadius: restored.brushRadius, brushSoftness: restored.brushSoftness)
+        }
+        _model = State(initialValue: model)
+        _hourOverride = State(initialValue: restored?.hourOverride)
+        _dateOverride = State(initialValue: restored?.dateOverride)
+        _coordinateOverride = State(initialValue: restored?.coordinateOverride)
+        _timeZoneOverride = State(initialValue: restored?.timeZoneOverride)
+        _fovOverride = State(initialValue: restored?.fovOverride)
+    }
 
     /// Catalogue BSC5 chargé une seule fois (paresseux, partagé).
     private static let starCatalog: [Star] = StarCatalog.load()
@@ -199,6 +221,21 @@ struct CanvasView: View {
                 ephemeris: astro.ephemeris(at: effectiveCoordinate, date: effectiveDate),
                 timeZone: effectiveTimeZone)
         }
+        .fileExporter(
+            isPresented: $showSaveExporter, document: saveDocument,
+            contentType: .aetherScene, defaultFilename: context.scene.title
+        ) { _ in }
+    }
+
+    /// Prépare le document de l'instant (état complet) puis ouvre le sélecteur
+    /// d'enregistrement. Échec silencieux si le paysage ne s'encode pas (rare).
+    private func presentSave() {
+        saveDocument = AetherDocument(
+            context: context, model: model,
+            hourOverride: hourOverride, dateOverride: dateOverride,
+            coordinateOverride: coordinateOverride, timeZoneOverride: timeZoneOverride,
+            fovOverride: fovOverride)
+        showSaveExporter = saveDocument != nil
     }
 
     /// Clé de recalcul des étoiles : lieu + tranche de temps (~60 s ; la rotation
@@ -787,6 +824,22 @@ struct CanvasView: View {
                 }
                 Divider()
                 positionPanel
+                Divider()
+                // Enregistre l'état courant dans un fichier `.aether` (ciel
+                // complet, autonome) — rechargeable depuis la galerie.
+                Button {
+                    activePanel = nil
+                    presentSave()
+                } label: {
+                    Label(
+                        String(localized: "action.save", table: "Aether"),
+                        systemImage: "square.and.arrow.down"
+                    )
+                    .font(.callout)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.primary)
             }
             // Borne la largeur : sinon le Divider étire la carte sur toute la
             // largeur proposée (grand vide à gauche, surtout en paysage).
