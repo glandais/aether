@@ -98,7 +98,7 @@ capturer, **puis retirer le code temporaire**.
 | `Aether/App/` | entry point SwiftUI, navigation racine | Features |
 | `Aether/Features/` | modules SwiftUI par feature (Canvas, Gallery, Settings) | Domain, Services |
 | `Aether/Rendering/` | pipeline Metal, shaders, volume textures | Domain **uniquement** |
-| `Aether/Domain/` | modèles purs (`Scene`, `CloudVolume`, `BrushStroke`, `Lighting`, `WeatherSnapshot`, `CelestialPosition`) | **rien** |
+| `Aether/Domain/` | modèles purs (`Scene`, `CloudCube`, `BrushStroke`, `Lighting`, `WeatherSnapshot`, `CelestialPosition`) | **rien** |
 | `Aether/Services/` | `AstroService`, `LocationService` (protocoles + impl) | Domain |
 | `Aether/Resources/` | assets, paysages curés | — |
 
@@ -115,8 +115,11 @@ capturer, **puis retirer le code temporaire**.
 
 Pipeline volumétrique en couches (raymarching → bruit 3D → pinceau → scattering →
 demi-rés/temporel → astro → météo), plus ciel atmosphérique, mer, astres et
-étoiles. **Complet et vérifié.** Détail des étapes, choix d'implémentation et
-notes par fonctionnalité : [`docs/PIPELINE.md`](docs/PIPELINE.md). Références
+étoiles. **Complet et vérifié.** Les nuages vivent à **position réelle en monde** :
+chaque changement de regard ouvre un **nouveau cube** ancré sur la direction
+courante (`CloudCube`, atlas de slabs, raymarch multi-boîtes), donc on peint dans
+plusieurs directions du ciel. Détail des étapes, choix d'implémentation et notes
+par fonctionnalité : [`docs/PIPELINE.md`](docs/PIPELINE.md). Références
 algorithmiques (papers + code) : [`BIBLIO.md`](BIBLIO.md).
 
 Toute évolution du rendu doit rester **visuellement vérifiable par capture sur
@@ -144,9 +147,10 @@ IAP, analytics, crash reporting.
 
 **Distribution — App Store.** Pipeline de rendu complet plus galerie curée,
 éclairage selon la scène, météo statique, heure choisie + lune, fond de ciel
-atmosphérique, caméra à regard libre, mer raymarchée, soleil / lune / étoiles
-dessinés dans le ciel, et persistance d'un ciel en fichier `.aether` — tout est
-implémenté et vérifié. Version courante :
+atmosphérique, caméra à regard libre, **peinture multi-cubes** (un cube de nuage
+par direction de regard), mer raymarchée, soleil / lune / étoiles dessinés dans le
+ciel, et persistance d'un ciel en fichier `.aether` — tout est implémenté et
+vérifié. Version courante :
 **`1.0.1` (build 2)**, bundle `io.github.glandais.aether` (`MARKETING_VERSION` /
 `CURRENT_PROJECT_VERSION` dans `project.yml`).
 

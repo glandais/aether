@@ -13,9 +13,10 @@ une poignée de gestes et de sliders.
 
 ## L'expérience
 
-- **Peinture de nuages** : silhouettes peintes au doigt → champ de densité 3D
-  raymarché (Perlin-Worley, Beer-Lambert, Henyey-Greenstein, multi-scattering),
-  pinceau réglable (rayon / adoucissement), annuler / rétablir.
+- **Peinture de nuages** : silhouettes peintes au doigt, **dans plusieurs
+  directions du ciel** → champ de densité 3D raymarché (Perlin-Worley,
+  Beer-Lambert, Henyey-Greenstein, multi-scattering), pinceau réglable (rayon /
+  adoucissement), annuler / rétablir.
 - **Ciel physique** : fond atmosphérique (Rayleigh + Mie) qui suit le soleil ;
   soleil, lune **phasée** et étoiles (Bright Star Catalog) dessinés dans le ciel,
   occlus par les nuages.
@@ -24,8 +25,9 @@ une poignée de gestes et de sliders.
   par paysage qui informe l'état initial du nuage.
 - **Mer raymarchée** sous l'horizon sur certains paysages, avec reflet de ciel,
   glint solaire et clair de lune.
-- **Regard libre** : pivoter la vue (1 doigt) et zoomer (pincement) ; le ciel et
-  l'éclairage suivent.
+- **Regard libre** : les nuages vivent à leur place dans le monde — pivoter la vue
+  (1 doigt) et zoomer (pincement) les **orbite** sans les effacer, et peindre dans
+  une nouvelle direction ajoute un nuage là où on regarde. Ciel et éclairage suivent.
 - **Enregistrer un ciel** : sauvegarder l'état complet (paysage, nuages, instant,
   regard) dans un fichier `.aether` autonome, rouvrir plus tard à l'identique.
 
