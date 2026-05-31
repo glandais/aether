@@ -88,6 +88,24 @@ projet (XcodeGen) puis enchaîne **SwiftLint** (`--strict`, config
 avertissement ; il doit rester vert. Outils à installer via Homebrew (hors du
 script) : `brew install swiftlint periphery`.
 
+### Site vitrine (`web/`)
+
+Site statique de présentation, **HTML + CSS pur** (pas de build, pas de
+framework), dans `web/` : accueil (`index.html`), politique de confidentialité
+(`privacy/`) et support (`support/`) — ces deux dernières fournissent les
+**URLs requises par App Store Connect**. Thème crépusculaire propre à Aether ;
+l'icône de l'app est copiée en `web/icon.png`. Aperçu local :
+`cd web && python3 -m http.server`.
+
+Hébergé sur **GitHub Pages**, base canonique `https://glandais.github.io/aether/` :
+- Support : `https://glandais.github.io/aether/support/`
+- Confidentialité : `https://glandais.github.io/aether/privacy/`
+
+Déploiement automatique via `.github/workflows/pages.yml` à chaque push sur
+**`develop`** touchant `web/**`. Prérequis une fois : régler la source Pages du
+dépôt sur **« GitHub Actions »**. Les captures réelles peuvent remplacer l'art
+CSS aux emplacements `<!-- SCREENSHOT SLOT: … -->` de `index.html`.
+
 ### Pièges connus
 
 - Le Domain définit un type `Scene`, qui masque `SwiftUI.Scene`. Dans
@@ -160,7 +178,7 @@ atmosphérique, caméra à regard libre, **peinture multi-cubes** (un cube de nu
 par direction de regard), mer raymarchée, soleil / lune / étoiles dessinés dans le
 ciel, et persistance d'un ciel en fichier `.aether` — tout est implémenté et
 vérifié. Version courante :
-**`1.0.1` (build 2)**, bundle `io.github.glandais.aether` (`MARKETING_VERSION` /
+**`1.0.3` (build 4)**, bundle `io.github.glandais.aether` (`MARKETING_VERSION` /
 `CURRENT_PROJECT_VERSION` dans `project.yml`).
 
 - Détail du pipeline et des fonctionnalités : [`docs/PIPELINE.md`](docs/PIPELINE.md)
@@ -173,7 +191,8 @@ vérifié. Version courante :
 
 - **Release App Store publique** (TestFlight-first pour l'instant) : captures,
   métadonnées, App Privacy, prix, soumission — détail dans
-  [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md). Skills `asc-*`.
+  [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md). Skills `asc-*`. URLs support /
+  confidentialité fournies par le site vitrine (cf. « Site vitrine »).
 - **Réglages** (`Features/Settings`) : choisir le **lieu** (l'heure est déjà
   réglable au canvas ; manque la sélection géographique manuelle).
 - **Profilage perf sur device réel** : mer demi-rés confirmée à 60 ips
