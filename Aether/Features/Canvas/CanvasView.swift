@@ -30,6 +30,9 @@ private enum ToolPanel {
 
 struct CanvasView: View {
     let context: SceneContext
+    /// Harnais de capture : masque toute l'interface (y compris la pastille
+    /// « Options ») pour un ciel plein cadre.
+    private let chromeHidden: Bool
 
     @State private var model = CanvasModel()
     /// Heure locale choisie (heures, 0…24). `nil` = heure d'origine de la scène.
@@ -58,7 +61,7 @@ struct CanvasView: View {
     /// Révèle toutes les options (retour, regard, pinceau, heure). Déployé à
     /// l'ouverture : l'outil dessin actif est ainsi visible d'emblée ; on peut
     /// replier d'un geste pour dégager le ciel.
-    @State private var showOptions = true
+    @State private var showOptions: Bool
     /// Hauteur compacte (paysage iPhone) : la palette passe en rangée
     /// horizontale, la largeur (abondante) absorbant les pastilles.
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -81,8 +84,9 @@ struct CanvasView: View {
     /// Construit la vue, éventuellement réamorcée depuis un fichier `.aether`
     /// rechargé : les traits, le regard, le pinceau et les surcharges
     /// (heure/jour/lieu/fuseau/FOV) sont appliqués d'emblée, sans frame transitoire.
-    init(context: SceneContext, restored: RestoredCanvasState? = nil) {
+    init(context: SceneContext, restored: RestoredCanvasState? = nil, chromeHidden: Bool = false) {
         self.context = context
+        self.chromeHidden = chromeHidden
         let model = CanvasModel()
         if let restored {
             model.load(
@@ -95,6 +99,8 @@ struct CanvasView: View {
         _coordinateOverride = State(initialValue: restored?.coordinateOverride)
         _timeZoneOverride = State(initialValue: restored?.timeZoneOverride)
         _fovOverride = State(initialValue: restored?.fovOverride)
+        // Harnais de capture : masque toute l'interface pour un ciel plein cadre.
+        _showOptions = State(initialValue: !chromeHidden)
     }
 
     /// Catalogue BSC5 chargé une seule fois (paresseux, partagé).
@@ -167,7 +173,7 @@ struct CanvasView: View {
         return ZStack {
             Color.black.ignoresSafeArea()
             canvas(light: light)
-            if showOptions {
+            if showOptions && !chromeHidden {
                 VStack(spacing: 14) {
                     Spacer()
                     timeBar(isDaytime: light.isDaytime)
@@ -177,8 +183,10 @@ struct CanvasView: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            toolPalette(light: light)
-                .padding(.trailing, 16).padding(.top, 8)
+            if !chromeHidden {
+                toolPalette(light: light)
+                    .padding(.trailing, 16).padding(.top, 8)
+            }
         }
         // Recalcul des étoiles hors `body` : seulement au changement de lieu/heure
         // (bucket ~60 s), pas à chaque frame de rotation/zoom.
