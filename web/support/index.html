@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Support — Aether</title>
+  <meta name="description" content="How to use Aether, painting tips, FAQ, known limitations, and how to report a bug.">
+  <link rel="canonical" href="https://glandais.github.io/aether/support/">
+  <link rel="icon" type="image/svg+xml" href="../favicon.svg">
+  <link rel="apple-touch-icon" href="../icon.png">
+  <meta name="theme-color" content="#090C18">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Aether — Support">
+  <meta property="og:description" content="How to use Aether, painting tips, FAQ, and bug reporting.">
+  <meta property="og:url" content="https://glandais.github.io/aether/support/">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container site-header__inner">
+      <a class="wordmark" href="../">
+        <span class="wordmark__orb" aria-hidden="true"></span>
+        <span>Aether</span>
+      </a>
+      <nav class="site-nav" aria-label="Primary">
+        <a href="../">Index</a>
+        <a href="../privacy/">Privacy</a>
+        <a href="../support/" aria-current="page">Support</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container-narrow prose">
+    <header class="prose__header">
+      <span class="label label-accent">Document S-01</span>
+      <h1>Support</h1>
+      <p class="meta">Aether for iPhone · iOS 17+</p>
+    </header>
+
+    <section>
+      <p class="lead">
+        Aether is a small app maintained by one person. The fastest way to get
+        help, request a feature, or report a bug is the GitHub issue tracker.
+        Everything else lives below.
+      </p>
+
+      <div class="cta-row">
+        <a class="btn btn--primary" href="https://github.com/glandais/aether/issues" rel="noopener">
+          Report an issue <span aria-hidden="true">→</span>
+        </a>
+        <a class="btn" href="mailto:gabriel.landais@gmail.com">Email the developer</a>
+      </div>
+    </section>
+
+    <section>
+      <h2 data-num="01">Quick start</h2>
+      <ol>
+        <li><strong>Choose a landscape.</strong> The gallery offers four curated scenes — Crépuscule (Paris), Aube (Kyoto), Heure bleue (Reykjavík), and Plein midi (Sydney) — each anchored to a real place, time, and weather mood. Or open a saved <code>.aether</code> file.</li>
+        <li><strong>Paint clouds.</strong> Draw silhouettes with your finger; each stroke becomes a volumetric 3D cloud. Adjust brush radius and softness, and undo, redo, or clear at any time.</li>
+        <li><strong>Set the light.</strong> Drag the hour slider — or let time advance automatically — to move the sun and the phased moon. Your clouds relight live. Tap to centre the view on the sun or moon, and open the ephemeris for sunrise, sunset, and the lunar phase.</li>
+        <li><strong>Save &amp; share.</strong> Save the whole sky to a self-contained <code>.aether</code> file, then send it anywhere through the iOS share sheet (Files, Messages, AirDrop).</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2 data-num="02">Painting a whole sky</h2>
+      <ul>
+        <li><strong>Look around</strong> — drag with one finger to rotate the view and pinch to zoom. Nothing erases when you move.</li>
+        <li><strong>Paint in any direction</strong> — when you paint while facing a new direction, a fresh cloud opens there, anchored in world space. You can fill the sky all around you, up to a dozen cloud volumes per scene.</li>
+        <li><strong>Tune the brush</strong> — a smaller radius and higher softness give wispy cirrus; a larger radius with low softness builds dense, towering forms.</li>
+        <li><strong>Chase the light</strong> — clouds glow when backlit by a low sun, silver under the moon, and go flat at solar noon. Try the same painting at different hours.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2 data-num="03">Frequently asked questions</h2>
+      <div class="faq">
+        <details>
+          <summary>What do I need to run Aether?</summary>
+          <p>An iPhone on iOS 17 or later. The volumetric renderer uses Metal, which is available on all supported iPhones.</p>
+        </details>
+        <details>
+          <summary>Why does it ask for my location?</summary>
+          <p>Only if you choose “here and now”, to orient the sky to where you actually are — the coordinate is used on the device to compute the sun, moon, and star positions, and is never transmitted. You can skip it entirely and paint in the curated places instead. See the <a href="../privacy/">privacy policy</a>.</p>
+        </details>
+        <details>
+          <summary>Does it work offline?</summary>
+          <p>Yes — entirely. The landscapes, the star catalogue, and each scene's weather are bundled in the app, and painting, lighting, and rendering need no network. The only thing that uses the internet is the map tiles in the manual location picker.</p>
+        </details>
+        <details>
+          <summary>Can I use my own photo as the landscape?</summary>
+          <p>Not in this version. The four landscapes are generated by the app; photo import is intentionally out of scope to keep the experience focused.</p>
+        </details>
+        <details>
+          <summary>What is an <code>.aether</code> file?</summary>
+          <p>A self-contained snapshot of a sky — the landscape, all your strokes, and the place, hour, and view. Reopen it and Aether recomputes the exact same image from scratch, including the sun, moon, and stars. The file holds everything, so it stays valid indefinitely and never depends on a server.</p>
+        </details>
+        <details>
+          <summary>Where are my saved skies stored?</summary>
+          <p>Wherever you send them through the share sheet — Aether does not keep its own cloud library. By default nothing is stored outside the app's session unless you explicitly save or share. Nothing is uploaded.</p>
+        </details>
+        <details>
+          <summary>Do you collect data?</summary>
+          <p>No. See the <a href="../privacy/">privacy policy</a>. There is no account, no analytics, no advertising.</p>
+        </details>
+        <details>
+          <summary>What languages is it available in?</summary>
+          <p>English and French. The language follows your iOS system setting.</p>
+        </details>
+      </div>
+    </section>
+
+    <section>
+      <h2 data-num="04">Known limitations</h2>
+      <ul>
+        <li>The four landscapes are generated by the app; importing your own photo as a landscape is not supported.</li>
+        <li>A scene holds up to a dozen cloud volumes — one per direction you paint into. Beyond that, the oldest is reused.</li>
+        <li>The manual location picker shows a map, which needs an internet connection to load its tiles; the rest of the app works offline.</li>
+        <li>On very warm devices iOS may reduce the GPU clock, which can briefly lower the frame rate while painting a dense, full sky.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2 data-num="05">Reporting a bug</h2>
+      <p>
+        Open an issue on GitHub with: your iPhone model and iOS version, the Aether
+        version (in the iOS Settings app under Aether — currently 1.0.3), and the
+        steps to reproduce. A screenshot or short screen recording is always
+        welcome.
+      </p>
+      <dl class="contact">
+        <dt>Issues</dt>
+        <dd><a href="https://github.com/glandais/aether/issues" rel="noopener">github.com/glandais/aether/issues</a></dd>
+        <dt>Email</dt>
+        <dd><a href="mailto:gabriel.landais@gmail.com">gabriel.landais@gmail.com</a></dd>
+        <dt>Source</dt>
+        <dd><a href="https://github.com/glandais/aether" rel="noopener">github.com/glandais/aether</a></dd>
+      </dl>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container site-footer__inner">
+      <a class="wordmark" href="../">
+        <span class="wordmark__orb" aria-hidden="true"></span>
+        <span>Aether</span>
+      </a>
+      <nav class="site-footer__nav" aria-label="Footer">
+        <a href="../privacy/">Privacy</a>
+        <a href="../support/">Support</a>
+        <a href="https://github.com/glandais/aether/issues" rel="noopener">Report an issue</a>
+        <a href="mailto:gabriel.landais@gmail.com">Contact</a>
+      </nav>
+      <p class="site-footer__meta">
+        © <span id="year">2026</span> Gabriel Landais — Aether is an iOS app, not a service.
+      </p>
+    </div>
+  </footer>
+  <script>document.getElementById('year').textContent = new Date().getFullYear();</script>
+</body>
+</html>

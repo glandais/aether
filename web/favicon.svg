@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#16204a"/>
+      <stop offset="0.5" stop-color="#4a3f7a"/>
+      <stop offset="0.82" stop-color="#c9794f"/>
+      <stop offset="1" stop-color="#f4ad63"/>
+    </linearGradient>
+    <radialGradient id="sun" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ffe6c0"/>
+      <stop offset="0.55" stop-color="#f4ad63"/>
+      <stop offset="1" stop-color="#f4ad63" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="round"><rect x="2" y="2" width="60" height="60" rx="14"/></clipPath>
+  </defs>
+  <g clip-path="url(#round)">
+    <rect x="2" y="2" width="60" height="60" fill="url(#sky)"/>
+    <circle cx="32" cy="40" r="20" fill="url(#sun)"/>
+    <circle cx="32" cy="40" r="7.5" fill="#ffeccb"/>
+    <!-- soft painted cloud -->
+    <ellipse cx="26" cy="27" rx="18" ry="5.2" fill="#fdeedd" opacity="0.85"/>
+    <ellipse cx="40" cy="33" rx="13" ry="3.8" fill="#fbe2cd" opacity="0.7"/>
+  </g>
+</svg>

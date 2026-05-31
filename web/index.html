@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Aether — Paint volumetric clouds, lit by the real sky</title>
+  <meta name="description" content="Aether is a contemplative iPhone app for painting volumetric 3D clouds over a curated landscape, lit by the real position of the sun and moon. Private by design — no account, no network, no tracking.">
+  <link rel="canonical" href="https://glandais.github.io/aether/">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="apple-touch-icon" href="icon.png">
+  <meta name="theme-color" content="#090C18">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Aether — Paint the sky.">
+  <meta property="og:description" content="Paint cloud silhouettes; a Metal volumetric engine turns them into 3D clouds lit by the real sun and moon at the place and hour you choose. Contemplative, slow, satisfying.">
+  <meta property="og:url" content="https://glandais.github.io/aether/">
+  <meta property="og:image" content="https://glandais.github.io/aether/icon.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container site-header__inner">
+      <a class="wordmark" href="./">
+        <span class="wordmark__orb" aria-hidden="true"></span>
+        <span>Aether</span>
+      </a>
+      <nav class="site-nav" aria-label="Primary">
+        <a href="./" aria-current="page">Index</a>
+        <a href="privacy/">Privacy</a>
+        <a href="support/">Support</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero container">
+      <div class="hero__grid">
+        <div class="hero__head reveal reveal--1">
+          <span class="label">Aether — for iPhone · iOS 17+</span>
+          <h1 class="display">Paint the&nbsp;sky.<br><em>Let it light up.</em></h1>
+          <p class="lead hero__sub">
+            Choose a landscape, paint cloud silhouettes with a finger, and a Metal
+            volumetric engine turns them into three-dimensional clouds — lit by the
+            real sun and moon at the place and hour you choose. Contemplative, slow,
+            satisfying.
+          </p>
+
+          <dl class="hero__meta">
+            <div><dt>Platform</dt><dd>iPhone</dd></div>
+            <div><dt>Landscapes</dt><dd>4 curated</dd></div>
+            <div><dt>Renderer</dt><dd>Metal&nbsp;GPU</dd></div>
+            <div><dt>Network</dt><dd>0&nbsp;requests</dd></div>
+          </dl>
+
+          <div class="cta-row">
+            <a class="btn btn--primary" href="#features">See what it does <span aria-hidden="true">→</span></a>
+            <a class="btn" href="support/">Support</a>
+            <span class="btn__hint">Coming to the App&nbsp;Store · now in TestFlight</span>
+          </div>
+        </div>
+
+        <!-- SCREENSHOT SLOT: hero — replace this .skypanel block with a real
+             simulator screenshot (<img src="shots/hero.png" …>) when captured. -->
+        <div class="skypanel reveal reveal--2" role="img" aria-label="A painted dusk sky: warm clouds over a low sun and a calm sea.">
+          <span class="skypanel__cloud skypanel__cloud--a" aria-hidden="true"></span>
+          <span class="skypanel__cloud skypanel__cloud--b" aria-hidden="true"></span>
+          <span class="skypanel__cloud skypanel__cloud--c" aria-hidden="true"></span>
+          <span class="skypanel__sea" aria-hidden="true"></span>
+          <span class="skypanel__caption">Crépuscule · Paris · 19:15</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="section container">
+      <header class="section__head">
+        <span class="section__num">§ 00</span>
+        <h2 class="section__title">A sky you can paint into.</h2>
+      </header>
+      <div class="container-narrow" style="padding-inline: 0;">
+        <p class="lead">
+          Aether — from the Greek αἰθήρ, the luminous upper air and classical fifth
+          element. The name carries the idea: you act upon the sky. There is no
+          complex 3D editor here. A handful of gestures and sliders, and a sky that
+          answers to real light.
+        </p>
+      </div>
+    </section>
+
+    <section class="section container" id="features">
+      <header class="section__head">
+        <span class="section__num">§ 01</span>
+        <h2 class="section__title">What it does.</h2>
+      </header>
+
+      <div class="features">
+        <article class="feature">
+          <div class="feature__num">A — Brush</div>
+          <h3 class="feature__title">Paint clouds with a finger.</h3>
+          <p>Draw silhouettes on a simple canvas; a volumetric raymarcher turns each stroke into a real three-dimensional cloud, accumulated in a density field built from Perlin–Worley noise. Adjust brush radius and softness as you go.</p>
+        </article>
+
+        <article class="feature">
+          <div class="feature__num">B — Real light</div>
+          <h3 class="feature__title">Drag the hour; the sky follows.</h3>
+          <p>The sun and a correctly phased moon are computed from the real place and instant. Move the hour slider — or let time advance on its own — and your clouds relight live, from warm dawn through white noon to lunar night.</p>
+        </article>
+
+        <article class="feature">
+          <div class="feature__num">C — Physical sky</div>
+          <h3 class="feature__title">Sun, moon, and ~9,000 stars.</h3>
+          <p>An atmospheric sky (Rayleigh + Mie scattering) follows the sun. The moon shows its phase and earthshine; thousands of real stars from the Yale Bright Star Catalogue scintillate at night — all of it occluded by the clouds you paint.</p>
+        </article>
+
+        <article class="feature">
+          <div class="feature__num">D — Free gaze</div>
+          <h3 class="feature__title">Look anywhere. Keep painting.</h3>
+          <p>Rotate the view with one finger and pinch to zoom — nothing erases. Paint in a new direction and a fresh cloud opens there, anchored in world space, so you can fill the whole sky around you.</p>
+        </article>
+
+        <article class="feature">
+          <div class="feature__num">E — Seascape</div>
+          <h3 class="feature__title">A sea that mirrors the sky.</h3>
+          <p>On coastal landscapes, a ray-marched ocean stretches below the horizon — reflecting the sky, catching a glint of sun, and a path of moonlight at night.</p>
+        </article>
+
+        <article class="feature">
+          <div class="feature__num">F — Save a sky</div>
+          <h3 class="feature__title">Keep it as an <code>.aether</code> file.</h3>
+          <p>Every sky saves to a self-contained file — landscape, clouds, place, hour and view. Reopen it any time and the exact image is recomputed from scratch. No cloud account, nothing to expire.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section container">
+      <header class="section__head">
+        <span class="section__num">§ 02</span>
+        <h2 class="section__title">Four curated landscapes.</h2>
+      </header>
+
+      <div class="container-narrow" style="padding-inline: 0; margin-bottom: var(--s-8);">
+        <p class="lead">
+          Each landscape is anchored to a real place, time of day, and a fixed
+          weather mood that seeds the clouds — from clear to overcast.
+        </p>
+      </div>
+
+      <!-- SCREENSHOT SLOT: scenes — the painted swatches below can each be
+           replaced with a real simulator screenshot of that landscape. -->
+      <div class="scenes">
+        <article class="scene scene--dusk">
+          <div class="scene__art" role="img" aria-label="Twilight palette: indigo sky over a warm orange horizon."></div>
+          <div class="scene__meta">
+            <h3 class="scene__name">Crépuscule</h3>
+            <p class="scene__place">Paris · Twilight</p>
+          </div>
+        </article>
+        <article class="scene scene--dawn">
+          <div class="scene__art" role="img" aria-label="Dawn palette: pale blue sky over a peach horizon."></div>
+          <div class="scene__meta">
+            <h3 class="scene__name">Aube</h3>
+            <p class="scene__place">Kyoto · Dawn</p>
+          </div>
+        </article>
+        <article class="scene scene--blue">
+          <div class="scene__art" role="img" aria-label="Blue hour palette: deep blue, overcast."></div>
+          <div class="scene__meta">
+            <h3 class="scene__name">Heure bleue</h3>
+            <p class="scene__place">Reykjavík · Blue hour</p>
+          </div>
+        </article>
+        <article class="scene scene--noon">
+          <div class="scene__art" role="img" aria-label="Noon palette: bright blue daytime sky."></div>
+          <div class="scene__meta">
+            <h3 class="scene__name">Plein midi</h3>
+            <p class="scene__place">Sydney · Noon</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section container">
+      <header class="section__head">
+        <span class="section__num">§ 03</span>
+        <h2 class="section__title">Built with care.</h2>
+      </header>
+      <div class="container-narrow" style="padding-inline: 0;">
+        <p class="lead">
+          A native Swift 6 and SwiftUI app, rendered by a Metal volumetric
+          pipeline — raymarching, 3D noise, Henyey–Greenstein scattering and a
+          powder effect — held at a smooth frame rate on iPhone through half-resolution
+          tracing and temporal reprojection.
+        </p>
+        <p>
+          Solar and lunar positions come from astronomical formulae; the sky is
+          physically motivated rather than a stock backdrop. Everything runs on
+          device. Requires iOS&nbsp;17 or later.
+        </p>
+      </div>
+    </section>
+
+    <section class="section container">
+      <header class="section__head">
+        <span class="section__num">§ 04</span>
+        <h2 class="section__title">Private by design.</h2>
+      </header>
+      <div class="callout">
+        <div class="callout__mark" aria-hidden="true">·</div>
+        <p>
+          Aether collects no data. No account, no server, no analytics, no
+          third-party SDKs, no ads. Location, if you allow it, is used only on your
+          device to orient the sky — it never leaves the phone. Read the
+          <a href="privacy/">privacy policy</a>.
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container site-footer__inner">
+      <a class="wordmark" href="./">
+        <span class="wordmark__orb" aria-hidden="true"></span>
+        <span>Aether</span>
+      </a>
+      <nav class="site-footer__nav" aria-label="Footer">
+        <a href="privacy/">Privacy</a>
+        <a href="support/">Support</a>
+        <a href="https://github.com/glandais/aether/issues" rel="noopener">Report an issue</a>
+        <a href="mailto:gabriel.landais@gmail.com">Contact</a>
+      </nav>
+      <p class="site-footer__meta">
+        © <span id="year">2026</span> Gabriel Landais — Aether is an iOS app, not a service.
+      </p>
+    </div>
+  </footer>
+
+  <script>document.getElementById('year').textContent = new Date().getFullYear();</script>
+</body>
+</html>
