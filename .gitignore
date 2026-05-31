@@ -42,3 +42,6 @@ Package.resolved
 *.dSYM
 timeline.xctimeline
 playground.xcworkspace
+
+# Captures de travail App Store (régénérables via le harnais AETHER_SHOT)
+/screenshots/
