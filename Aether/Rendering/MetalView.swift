@@ -52,6 +52,7 @@ struct MetalView: UIViewRepresentable {
         let renderer = Renderer(view: view)
         context.coordinator.renderer = renderer
         view.delegate = renderer
+        context.coordinator.observeLifecycle(of: view)
         return view
     }
 
@@ -81,5 +82,30 @@ struct MetalView: UIViewRepresentable {
     final class Coordinator {
         var renderer: Renderer?
         var appliedContentID: UUID?
+        /// Vue observée pour suspendre la boucle de rendu hors premier plan.
+        private weak var view: MTKView?
+
+        /// Suspend le `CADisplayLink` du `MTKView` quand l'app n'est plus active
+        /// (verrouillage écran, bascule d'app, arrière-plan) et le relance au
+        /// retour. Sans cela le raymarching Metal continue de tourner à 60 ips en
+        /// tâche de fond et vide la batterie.
+        func observeLifecycle(of view: MTKView) {
+            self.view = view
+            let center = NotificationCenter.default
+            center.addObserver(
+                self, selector: #selector(suspendRendering),
+                name: UIApplication.willResignActiveNotification, object: nil)
+            center.addObserver(
+                self, selector: #selector(resumeRendering),
+                name: UIApplication.didBecomeActiveNotification, object: nil)
+        }
+
+        @objc private func suspendRendering() {
+            view?.isPaused = true
+        }
+
+        @objc private func resumeRendering() {
+            view?.isPaused = false
+        }
     }
 }
