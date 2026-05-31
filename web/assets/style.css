@@ -356,6 +356,39 @@ main { flex: 1 0 auto; }
   border-radius: 6px;
 }
 
+/* Real device screenshots (captured on iPhone 6.9") --------------------- */
+.shot {
+  margin: 0;
+  border-radius: 22px;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  box-shadow:
+    0 30px 80px -30px rgba(0, 0, 0, 0.8),
+    0 0 60px -20px rgba(242, 166, 90, 0.18);
+}
+.shot img { display: block; width: 100%; height: auto; }
+.shot--hero { max-width: 22rem; margin-inline: auto; }
+.shot figcaption {
+  padding: var(--s-3) var(--s-4);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--haze-muted);
+  border-top: 1px solid var(--rule);
+}
+.shots-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--s-6);
+  align-items: start;
+}
+@media (max-width: 860px) { .shots-strip { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 460px) {
+  .shots-strip { grid-template-columns: 1fr; max-width: 22rem; margin-inline: auto; }
+}
+
 .cta-row { display: flex; gap: var(--s-4); flex-wrap: wrap; margin-top: var(--s-6); align-items: center; }
 .btn {
   display: inline-flex;
