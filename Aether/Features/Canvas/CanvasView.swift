@@ -55,9 +55,10 @@ struct CanvasView: View {
     /// ouvrir l'un referme l'autre. Rendu en carte flottante **à côté** des
     /// pastilles (pas d'expansion inline qui repousserait la colonne).
     @State private var activePanel: ToolPanel?
-    /// Révèle toutes les options (retour, regard, pinceau, heure). Replié par
-    /// défaut : seule la bascule « Options » est visible, pour un ciel dégagé.
-    @State private var showOptions = false
+    /// Révèle toutes les options (retour, regard, pinceau, heure). Déployé à
+    /// l'ouverture : l'outil dessin actif est ainsi visible d'emblée ; on peut
+    /// replier d'un geste pour dégager le ciel.
+    @State private var showOptions = true
     /// Hauteur compacte (paysage iPhone) : la palette passe en rangée
     /// horizontale, la largeur (abondante) absorbant les pastilles.
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -313,6 +314,7 @@ struct CanvasView: View {
             optionsButton
             if showOptions {
                 rotateButton.transition(reveal)
+                brushBubble.transition(reveal)
                 // Annuler / rétablir / effacer : pastilles principales directes
                 // (pas de sous-menu), révélées seulement dès qu'il y a à éditer.
                 if hasEdits {
@@ -323,7 +325,6 @@ struct CanvasView: View {
                     actionBubble("trash", "action.clear", enabled: !model.strokes.isEmpty) { model.clear() }
                         .transition(reveal)
                 }
-                brushBubble.transition(reveal)
                 moreBubble.transition(reveal)
             }
         }
@@ -334,10 +335,14 @@ struct CanvasView: View {
         }
     }
 
-    /// Carte du panneau actif (vide si aucun), en matériau translucide.
+    /// Carte du panneau visible, en matériau translucide : « More » s'il est
+    /// ouvert ; sinon, en mode dessin (options déployées), les réglages de
+    /// pinceau — toujours présents tant qu'on peint, sans bascule.
     @ViewBuilder
     private func activePanelCard(light: ResolvedLight) -> some View {
-        if let panel = activePanel {
+        let panel: ToolPanel? =
+            activePanel == .more ? .more : (showOptions && !model.isRotating ? .brush : nil)
+        if let panel {
             panelContent(panel, light: light)
                 .padding(16)
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
@@ -348,10 +353,11 @@ struct CanvasView: View {
     /// Paysage iPhone (la palette passe à l'horizontale).
     private var isCompactHeight: Bool { verticalSizeClass == .compact }
 
-    /// Bascule le mode rotation du regard (jumeau du bouton pinceau).
+    /// Sélecteur du mode « regard » : mutuellement exclusif du mode dessin
+    /// (jumeau du bouton pinceau). Sélectionner le regard sort du dessin.
     private var rotateButton: some View {
         Button {
-            withAnimation(.easeInOut(duration: 0.2)) { model.isRotating.toggle() }
+            withAnimation(.easeInOut(duration: 0.2)) { model.isRotating = true }
         } label: {
             bubbleLabel("arrow.up.and.down.and.arrow.left.and.right", active: model.isRotating)
         }
@@ -785,8 +791,20 @@ struct CanvasView: View {
         .accessibilityLabel(Text(String(localized: label, table: "Aether")))
     }
 
+    /// Sélecteur du mode « dessin » : mutuellement exclusif du mode regard.
+    /// Sélectionner le dessin referme « More » pour laisser les réglages de
+    /// pinceau visibles tant qu'on peint.
     private var brushBubble: some View {
-        bubbleToggle(.brush, icon: "paintbrush.pointed", label: "group.brush")
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                model.isRotating = false
+                if activePanel == .more { activePanel = nil }
+            }
+        } label: {
+            bubbleLabel("paintbrush.pointed", active: !model.isRotating)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(String(localized: "group.brush", table: "Aether")))
     }
 
     /// Pastille « More » : regroupe les réglages contextuels (ciel, lieu).
