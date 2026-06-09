@@ -1,9 +1,9 @@
 # Multi-coquilles peintes — plan de travail
 
-> **Statut : VERSION DE TRAVAIL (brouillon).** Document de conception, pas encore
-> implémenté. Les valeurs numériques (rayons, échelles, comptes) sont
-> *illustratives* et à caler par capture. Rien ici n'est figé ; les sections
-> « Questions ouvertes » listent les décisions restantes.
+> **Statut : CONCEPTION VALIDÉE, non implémenté.** Relu contre la référence
+> `realtime_clouds` (`Sky.metal`) et le `Cloud.metal` actuel ; les décisions de
+> conception sont actées (§11). Les valeurs numériques (rayons, épaisseurs)
+> restent *illustratives*, à caler par capture pendant l'implémentation.
 
 ## 1. Pourquoi
 
@@ -91,9 +91,9 @@ enum CloudGenus: String, Codable, Sendable, CaseIterable {
 
     var shell: ShellSpec {
         switch self {
-        case .cirrus:      .init(inner: 207_000, outer: 207_600, cloudType: 0.05, noiseScale: 0.90, drift: .init(0.030, 0.004))
-        case .altocumulus: .init(inner: 204_000, outer: 205_000, cloudType: 0.45, noiseScale: 0.55, drift: .init(0.016, 0.006))
-        case .cumulus:     .init(inner: 201_000, outer: 203_000, cloudType: 0.85, noiseScale: 0.42, drift: .init(0.010, 0.004))
+        case .cirrus:      .init(inner: 207_000, outer: 207_600, cloudType: 0.05, noiseScale: 6.4e-4, drift: .init(0.030, 0.004))
+        case .altocumulus: .init(inner: 204_000, outer: 205_000, cloudType: 0.45, noiseScale: 3.9e-4, drift: .init(0.016, 0.006))
+        case .cumulus:     .init(inner: 201_000, outer: 203_000, cloudType: 0.85, noiseScale: 3.0e-4, drift: .init(0.010, 0.004))
         }
     }
 }
@@ -102,10 +102,20 @@ enum CloudGenus: String, Codable, Sendable, CaseIterable {
 struct ShellSpec: Sendable {
     var inner: Float; var outer: Float   // m au-dessus du centre planète
     var cloudType: Float                 // 0 stratus … 1 cumulus
-    var noiseScale: Float
+    var noiseScale: Float                // m⁻¹, en coordonnées planète (cf. note)
     var drift: SIMD2<Float>
 }
+```
 
+> **Attention aux unités de `noiseScale`** : le raymarch coquille opère en
+> coordonnées planète (`p ≈ 2·10⁵ m`) ; la référence sample son bruit à
+> `p * 0.0003` (`Sky.metal:548`). Le `kNoiseScale = 0.42` actuel d'Aether est
+> calé sur les unités monde des cubes et **ne se transpose pas** — l'utiliser
+> tel quel donnerait de l'aliasing pur. Ordre de grandeur correct : ~3·10⁻⁴,
+> modulé par genre (valeurs ci-dessus = ratios du brouillon ramenés à cette
+> échelle, à caler par capture).
+
+```swift
 /// Une coquille éditable = un calque. Concentrique aux autres ; porte ses traits
 /// (carte de couverture par direction) et ses paramètres météo. Remplace
 /// `CloudCube` : plus d'`anchorForward`, l'étage vient du `genus`.
@@ -127,13 +137,21 @@ struct CloudLayer: Equatable, Sendable, Codable {
   La logique « nouveau cube quand le regard change » disparaît ; tout trait va
   dans le **calque actif**. Undo/redo : instantané de `layers` (inchangé).
 - `CloudParameters` (coverageBias/densityScale issus du `WeatherSnapshot`)
-  alimente désormais des **valeurs par défaut par calque** (à décider : la météo
-  module-t-elle tous les calques également, ou par genre ?).
+  alimente désormais des **valeurs par défaut par calque** — défaut retenu :
+  mêmes valeurs pour tous les calques, ajustables par calque ensuite (cf. §12).
 
 ## 5. Peinture → couverture directionnelle
 
-Carte de couverture d'un calque = **équirectangulaire** (azimut × élévation), une
-tranche d'un atlas 2D `texture2d_array` (≈ 1024×512 × `maxCount`).
+Carte de couverture d'un calque = **équirectangulaire hémisphère supérieur**
+(azimut × élévation ∈ [0°, 90°]), une tranche d'un atlas 2D `texture2d_array`
+**1024×512 × `maxCount`, format `R8Unorm`** — échantillonné en
+`filter::linear`, donc ≤ 16 bits obligatoire (piège `R32Float` non filtrable
+sur GPU iOS, cf. CLAUDE.md « Pièges connus »).
+
+**Sous l'horizon : rien** (décision actée). Le domaine de la carte s'arrête à
+l'élévation 0 ; les points de trait sous la ligne d'horizon ne déposent rien
+(pas de clamp, pas de marge négative). Un dab à cheval sur l'horizon ne dépose
+que sa partie ≥ 0° — débordement naturel du pinceau, acceptable.
 
 Le kernel de stamp reste **texel-centrique** (comme `stamp_density_volume`
 aujourd'hui), mais en **2D** et **sans** la gaussienne de profondeur :
@@ -180,17 +198,27 @@ for (uint L = 0; L < u.layerCount; ++L) {           // ordre fixe = altitude cro
     float3 start = camPos + rd * intersectSphere(camPos, rd, sh.inner);
     float3 end   = camPos + rd * intersectSphere(camPos, rd, sh.outer);
     int steps = int(mix(96.0, 54.0, rd.y));
-    float ss = length(end - start) / float(steps);
+
+    // Cap the step length near the horizon (reference `dmod`, Sky.metal:663-664).
+    // At grazing angles the shell traversal reaches ~14x the shell thickness;
+    // dividing it uniformly would give huge steps and banding right where the
+    // gaze rests. The capped march covers only part of the traversal there --
+    // acceptable, transmittance saturates first.
+    float tdist = sh.outer - sh.inner;
+    float dmod  = smoothstep(0.0, 1.0, (length(end - start) / tdist) / 14.0);
+    float ss    = mix(tdist, tdist * 4.0, dmod) / float(steps);
     float3 p = start, step = rd * ss;
 
     for (int i = 0; i < steps; ++i, p += step) {
         float hf = (length(p) - sh.inner) / (sh.outer - sh.inner);  // height_fraction DU calque
         float g  = densityHeightGradient(hf, sh.cloudType);         // profil = genre
         float n  = noise.sample(noiseSampler, p * sh.noiseScale + drift(sh, u.time));
-        float density = shapeFrom(cov, g, n);        // couverture × gradient × bruit (cf. density() réf.)
+        float density = shapeFrom(cov, g, n);        // cf. note « shapeFrom » ci-dessous
         if (density > 0.001) {
             // … éclairage actuel conservé : octaves de multiple-scattering,
-            //   dualPhase(HG), powder, sunColor/skyAmbient injectés du CPU …
+            //   dualPhase(HG), powder, sunColor/skyAmbient injectés du CPU.
+            //   Marche de lumière BORNÉE à la coquille courante (auto-ombrage
+            //   seul, décision §11) ; elle réutilise `cov` (constant par pixel).
             // accumulation transmittance/scattered PARTAGÉE entre calques :
             // un cirrus translucide laisse voir le cumulus dessous.
         }
@@ -206,6 +234,18 @@ return float4(scattered, alpha);
 **sa** coquille ; c'est l'**empilement** de coquilles qui crée les étages, pas
 `height_fraction` seul.
 
+**Note `shapeFrom` — ne pas importer la fenêtre de couverture de la
+référence.** `density()` de référence fait
+`cloud_coverage = smoothstep(0.6, 1.3, weather.x)` (`Sky.metal:552`) : pensée
+pour une texture météo procédurale, cette fenêtre annulerait toute couverture
+peinte < 0.6 — la moitié basse des traits disparaîtrait. Garder la chaîne de
+remap actuelle de `cloudDensity` (`Cloud.metal:127-130`, calée sur la
+peinture : `base = remap(n.r, 1-painted, …)` puis érosion par le détail) et y
+**multiplier** le gradient de hauteur `g`. Le `densityHeightGradient` /
+`mixGradients` de la référence (`Sky.metal:511-525`) se porte tel quel —
+Aether n'a aujourd'hui ni gradient de hauteur ni `height_fraction` (la forme
+venait du volume peint).
+
 ## 7. Ce qui est supprimé / simplifié
 
 | Supprimé | Remplacé par |
@@ -216,13 +256,23 @@ return float4(scattered, alpha);
 | `depthProfile`/gaussienne dans `stamp` | rien (stamp 2D) |
 | Logique « nouveau cube quand le regard change » | `activeGenus` sélectionné dans l'UI |
 
-## 8. Compromis connus
+## 8. Compromis connus (assumés)
 
 - **Parallaxe horizontale** : la référence sample en `p.xz` (varie le long du
   rayon → étirement vers l'horizon). En directionnel-constant on le perd ; la
   convergence à l'horizon reste assurée par la géométrie de coquille + le bruit
   3D (qui varie en `p`). Récupérable en samplant la couverture à la direction de
-  `p` plutôt que `rd`, au coût d'un sample/pas. **À trancher par capture.**
+  `p` plutôt que `rd`, au coût d'un sample/pas. **Défaut : `rd` (constant), à
+  comparer par capture à l'étape 3.**
+- **Couverture constante dans la marche de lumière** : la référence sample
+  `weather` à chaque pas de lumière (`Sky.metal:601`) ; en directionnel-constant
+  le rayon de lumière « ne voit pas » qu'il sort du nuage peint — auto-ombrage
+  légèrement faux en bord de trait. Même arbitrage que la parallaxe (sampler la
+  couverture à `normalize(q)` par pas de lumière si la capture l'exige).
+- **Pas d'ombrage croisé entre coquilles** (décision §11) : un cirrus dense
+  n'assombrit pas le cumulus dessous ; chaque coquille ne s'ombre qu'elle-même.
+- **Stamp purement additif** (`max`), pas de gomme en v2 : seul l'undo retire de
+  la matière (décision §11).
 - **Distorsion aux pôles** de l'équirect : faible (on ne peint que l'hémisphère
   sup.) ; le stamp texel-centrique évite la déformation des disques.
 - **Perf** : `layerCount × steps` (≈ 4 × 70) vs aujourd'hui (12 cubes × 64) — même
@@ -237,47 +287,75 @@ avant d'ajouter les étages.
 
 1. **Domain** : `CloudGenus` + `ShellSpec` + `CloudLayer`. Tests purs (rayons
    cohérents, `density` shape mapping si extrait en util testable).
-2. **Stamp 2D** : `stamp_coverage_map` (kernel 2D), atlas `texture2d_array`.
+2. **Stamp 2D** : `stamp_coverage_map` (kernel 2D), atlas `texture2d_array`
+   1024×512 `R8Unorm`, domaine hémisphère sup. (pas de dépôt sous l'horizon).
    Retirer `depthProfile`. Capture : un trait → tache de couverture correcte.
 3. **Raymarch une coquille** : remplacer cubes/atlas par **une** coquille
-   `cumulus` lisant la couverture peinte. Parité visuelle vs cubes. Capture.
+   `cumulus` lisant la couverture peinte — avec le pas borné `dmod` (§6) et la
+   chaîne de remap actuelle × gradient de hauteur. Parité visuelle vs cubes ;
+   capture dédiée à l'horizon (banding) et au bord de trait (auto-ombrage).
 4. **Multi-coquilles** : boucle concentrique, `layerCount` calques, accumulation
-   partagée. Capture cirrus + cumulus simultanés.
+   partagée. Capture cirrus + cumulus simultanés. Si le cirrus manque de
+   fibreux : porter l'érosion « hq » de la référence (Worley haute fréquence +
+   distorsion curl, `Sky.metal:556-562`) — raffinement optionnel, Aether n'a
+   aujourd'hui qu'une seule RGBA Perlin-Worley.
 5. **UI calques** (`Features/Canvas`) : sélecteur de calque actif (genre),
    visibilité, opacité. Registre sobre/atmosphérique.
 6. **Météo → défauts par calque** : brancher `CloudParameters`/`WeatherSnapshot`.
-7. **Persistance `.aether`** : migration de schéma (cf. §10).
+7. **Persistance `.aether`** : bump de schéma `version: 2`, refus propre des
+   fichiers v1 (cf. §10).
 8. **Nettoyage** : retirer `CloudCube`, `CloudCubeGPU`, atlas 3D, `cubeCenter`,
    logique multi-cubes du `CanvasModel`. `scripts/verify.sh` vert.
 
-## 10. Persistance & migration `.aether`
+## 10. Persistance `.aether`
 
-- Le schéma `.aether` encode aujourd'hui `[CloudCube]`. Le passage à
-  `[CloudLayer]` est **cassant**.
-- À décider : versionner le document (champ `schemaVersion`) avec une lecture
-  best-effort des anciens fichiers (mapper un cube → un calque `cumulus` ?), ou
-  bump franc sans rétrocompat (l'app n'est qu'en TestFlight ; peu d'utilisateurs
-  réels). Voir `docs/PERSISTENCE.md`.
+**Décision actée : pas de rétrocompatibilité** (l'app n'est pas publiée). Le
+schéma passe de `[CloudCube]` à `[CloudLayer]` avec bump franc de
+`AetherDocument.version` (1 → 2) ; les fichiers v1 sont refusés avec un message
+propre. Le champ `version` existant (`AetherDocument.swift`) laisse la porte
+ouverte à de vraies migrations futures. Voir `docs/PERSISTENCE.md`.
 
-## 11. Questions ouvertes
+## 11. Décisions actées (2026-06)
 
-- **Rayons/épaisseurs par genre** : valeurs §4 illustratives — à caler par capture
-  (séparation visible des étages, convergence à l'horizon).
-- **Paramétrisation de la carte** : équirect hémisphère sup. uniquement, ou dôme
-  complet ? Résolution (1024×512 ?).
-- **Parallaxe** : couverture en `rd` (constante/pixel) vs en `p` (1 sample/pas) —
-  arbitrage qualité/perf.
-- **Météo multi-calques** : la météo statique module-t-elle tous les calques, ou
-  des défauts par genre + override par calque ?
-- **Regard libre** : on garde yaw/pitch ; le regard ne crée plus de domaine — le
-  vérifier sur la cohérence peinture/rendu (mapping directionnel partagé).
-- **Bruit** : le bruit RGBA Perlin-Worley actuel (`CloudNoise.metal`) suffit-il
-  pour le cirrus fibreux, ou faut-il un bruit étiré/anisotrope par genre ?
+- **Migration `.aether`** : bump franc `version: 2`, pas de rétrocompat (§10).
+- **Sous l'horizon** : les points de trait sous l'élévation 0 ne déposent rien ;
+  pas de clamp, pas de marge négative dans la carte (§5).
+- **Ombrage croisé** : auto-ombrage seul — la marche de lumière est bornée à la
+  coquille courante, comme le light march actuel borné au cube. À réévaluer par
+  capture à l'étape 4 si l'empilement paraît faux.
+- **Effacement** : rien en v2 — pas de gomme, pas de « vider le calque » ;
+  undo/redo (instantané de `layers`) suffit. À revoir à l'usage.
+- **Paramétrisation de la carte** : équirect hémisphère sup. uniquement,
+  1024×512, `R8Unorm` (§5).
+- **Drift** : le bruit dérive, la couverture peinte reste fixe dans sa direction
+  (comportement de la référence, `p.x += time` dans `density()` seulement) — le
+  nuage bouillonne sur place, il ne s'enfuit pas.
+
+## 12. Restent à caler par capture
+
+- **Rayons/épaisseurs par genre** : valeurs §4 illustratives (séparation visible
+  des étages, convergence à l'horizon).
+- **`noiseScale` par genre** : ordre de grandeur fixé (~3·10⁻⁴, §4), ratios à
+  affiner.
+- **Parallaxe** : couverture en `rd` (défaut) vs en `p` (1 sample/pas) — même
+  arbitrage pour la marche de lumière (§8). Capture comparative à l'étape 3.
+- **Météo multi-calques** (étape 6) : défaut proposé — `WeatherSnapshot` fournit
+  les mêmes `coverageBias`/`opacity` par défaut à tous les calques, ajustables
+  ensuite par calque ; affiner si un modulage par genre s'avère nécessaire.
+- **Regard libre** : on garde yaw/pitch ; le regard ne crée plus de domaine — la
+  cohérence peinture/rendu repose sur le mapping directionnel partagé entre
+  `stamp` et raymarch ; à vérifier en peignant puis tournant le regard.
+- **Bruit cirrus** : la RGBA Perlin-Worley seule suffira-t-elle ? Sinon, érosion
+  Worley HF + curl de la référence (étape 4, raffinement optionnel).
 - **Nombre de calques** : `maxCount = 4` suffisant ? (cirrus / alto / cumulus +1.)
 
-## 12. Références
+## 13. Références
 
-- `realtime_clouds/ios/RealtimeClouds/Shaders/Sky.metal` — shell HZD de référence.
+- `realtime_clouds/ios/RealtimeClouds/Shaders/Sky.metal` — shell HZD de
+  référence (dépôt local : `~/code/other/realtime_clouds`). Repères :
+  gradients de hauteur `:511-525`, fenêtre de couverture `:552`, érosion
+  curl/Worley HF `:556-562`, light march cône `:599-610`, pas borné `dmod`
+  `:663-664`.
 - `docs/PIPELINE.md` — pipeline de rendu actuel (cubes).
 - `BIBLIO.md` — papers (Schneider/Nubis, HZD, scattering).
 - Code remplacé : `Aether/Domain/CloudCube.swift`,
