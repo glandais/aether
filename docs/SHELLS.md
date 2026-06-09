@@ -1,9 +1,13 @@
 # Multi-coquilles peintes — plan de travail
 
-> **Statut : CONCEPTION VALIDÉE, non implémenté.** Relu contre la référence
-> `realtime_clouds` (`Sky.metal`) et le `Cloud.metal` actuel ; les décisions de
-> conception sont actées (§11). Les valeurs numériques (rayons, épaisseurs)
-> restent *illustratives*, à caler par capture pendant l'implémentation.
+> **Statut : IMPLÉMENTÉ (2026-06-10).** Les 8 étapes du §9 sont livrées : modèle
+> Domain, stamp de couverture directionnelle, raymarch concentrique mono- puis
+> multi-coquilles, UI des calques, défauts météo par calque, persistance `.aether`
+> v2, et nettoyage final (cubes / atlas 3D / multi-cubes retirés). Le rendu visible
+> est désormais entièrement coquilles ; `scripts/verify.sh` est vert sans exception.
+> Détail dans [`PIPELINE.md`](PIPELINE.md) (« Calques multi-coquilles »). Les
+> valeurs numériques (rayons, épaisseurs, `noiseScale`) restent à affiner par
+> capture (cf. §12).
 
 ## 1. Pourquoi
 

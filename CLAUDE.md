@@ -124,8 +124,8 @@ CSS aux emplacements `<!-- SCREENSHOT SLOT: … -->` de `index.html`.
 |---|---|---|
 | `Aether/App/` | entry point SwiftUI, navigation racine | Features |
 | `Aether/Features/` | modules SwiftUI par feature (Canvas, Gallery, Settings) | Domain, Services |
-| `Aether/Rendering/` | pipeline Metal, shaders, volume textures | Domain **uniquement** |
-| `Aether/Domain/` | modèles purs (`Scene`, `CloudCube`, `BrushStroke`, `WeatherSnapshot`, `CelestialPosition`) | **rien** |
+| `Aether/Rendering/` | pipeline Metal, shaders, atlas de couverture / bruit 3D | Domain **uniquement** |
+| `Aether/Domain/` | modèles purs (`Scene`, `CloudLayer`/`CloudGenus`, `BrushStroke`, `WeatherSnapshot`, `CelestialPosition`) | **rien** |
 | `Aether/Services/` | `AstroService`, `LocationService` (protocoles + impl) | Domain |
 | `Aether/Resources/` | assets, paysages curés | — |
 
@@ -142,12 +142,15 @@ CSS aux emplacements `<!-- SCREENSHOT SLOT: … -->` de `index.html`.
 
 Pipeline volumétrique en couches (raymarching → bruit 3D → pinceau → scattering →
 demi-rés/temporel → astro → météo), plus ciel atmosphérique, mer, astres et
-étoiles. **Complet et vérifié.** Les nuages vivent à **position réelle en monde** :
-chaque changement de regard ouvre un **nouveau cube** ancré sur la direction
-courante (`CloudCube`, atlas de slabs, raymarch multi-boîtes), donc on peint dans
-plusieurs directions du ciel. Détail des étapes, choix d'implémentation et notes
-par fonctionnalité : [`docs/PIPELINE.md`](docs/PIPELINE.md). Références
-algorithmiques (papers + code) : [`BIBLIO.md`](BIBLIO.md).
+étoiles. **Complet et vérifié.** Les nuages vivent dans des **coquilles
+sphériques concentriques** enveloppant le ciel (modèle `realtime_clouds`) : un
+calque éditable = une coquille à une altitude, l'empilement crée les étages
+(`CloudLayer`/`CloudGenus`, couverture peinte en carte 2D directionnelle, raymarch
+concentrique). La peinture se dépose par direction du ciel ; le regard l'oriente,
+il ne crée plus de domaine. Détail des étapes, choix d'implémentation et notes par
+fonctionnalité : [`docs/PIPELINE.md`](docs/PIPELINE.md) ; plan et décisions du
+modèle coquilles : [`docs/SHELLS.md`](docs/SHELLS.md). Références algorithmiques
+(papers + code) : [`BIBLIO.md`](BIBLIO.md).
 
 Toute évolution du rendu doit rester **visuellement vérifiable par capture sur
 simulateur** (cf. « Build & vérification »).
@@ -174,8 +177,9 @@ IAP, analytics, crash reporting.
 
 **Distribution — App Store.** Pipeline de rendu complet plus galerie curée,
 éclairage selon la scène, météo statique, heure choisie + lune, fond de ciel
-atmosphérique, caméra à regard libre, **peinture multi-cubes** (un cube de nuage
-par direction de regard), mer raymarchée, soleil / lune / étoiles dessinés dans le
+atmosphérique, caméra à regard libre, **peinture en calques multi-coquilles** (une
+coquille concentrique par étage : cumulus / altocumulus / cirrus, couverture peinte
+par direction du ciel), mer raymarchée, soleil / lune / étoiles dessinés dans le
 ciel, et persistance d'un ciel en fichier `.aether` — tout est implémenté et
 vérifié. Version courante :
 **`1.0.3` (build 4)**, bundle `io.github.glandais.aether` (`MARKETING_VERSION` /

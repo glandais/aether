@@ -84,60 +84,74 @@ struct CanvasModelTests {
         #expect(model.viewPitch > -1.5)
     }
 
-    // MARK: - Cubes multiples (un cube par état caméra)
+    // MARK: - Calques (un par étage / genre)
 
-    /// Caméra de test orientée par un lacet `angle` (radians) autour de l'axe Y.
-    private static func camera(yaw angle: Float) -> StrokeCamera {
-        StrokeCamera(
-            right: SIMD3(cos(angle), 0, sin(angle)), up: SIMD3(0, 1, 0),
-            forward: SIMD3(sin(angle), 0, -cos(angle)),
-            tanHalfFov: 0.5, aspect: 1)
-    }
-
-    @Test("Peindre sans changer de regard reste dans un seul cube")
-    func sameViewKeepsSingleCube() {
+    @Test("Peindre sans changer de genre reste dans un seul calque")
+    func sameGenusKeepsSingleLayer() {
         let model = CanvasModel()
         model.beginStroke(at: SIMD2(0.5, 0.5), camera: Self.testCamera)
         model.endStroke()
         model.beginStroke(at: SIMD2(0.2, 0.2), camera: Self.testCamera)
         model.endStroke()
-        #expect(model.cubes.count == 1)
-        #expect(model.cubes.first?.strokes.count == 2)
+        #expect(model.layers.count == 1)
+        #expect(model.layers.first?.genus == .cumulus)  // défaut
+        #expect(model.layers.first?.strokes.count == 2)
     }
 
-    @Test("Changer de regard ouvre un nouveau cube ancré sur ce regard")
-    func changedViewOpensNewCube() {
+    @Test("Changer de genre ouvre un nouveau calque à cet étage")
+    func changedGenusOpensNewLayer() {
         let model = CanvasModel()
-        model.beginStroke(at: SIMD2(0.5, 0.5), camera: Self.camera(yaw: 0))
+        model.beginStroke(at: SIMD2(0.5, 0.5), camera: Self.testCamera)
         model.endStroke()
-        model.beginStroke(at: SIMD2(0.5, 0.5), camera: Self.camera(yaw: 1))
+        model.selectGenus(.cirrus)
+        model.beginStroke(at: SIMD2(0.5, 0.5), camera: Self.testCamera)
         model.endStroke()
-        #expect(model.cubes.count == 2)
-        #expect(model.cubes.last?.anchorForward == Self.camera(yaw: 1).forward)
+        #expect(model.layers.count == 2)
+        #expect(model.layer(for: .cirrus)?.strokes.count == 1)
+        #expect(model.layer(for: .cumulus)?.strokes.count == 1)
     }
 
-    @Test("Annuler un trait qui a créé un cube retire ce cube")
-    func undoRemovesNewCube() {
+    @Test("Repeindre un genre déjà peint réutilise son calque")
+    func returningToGenusReusesLayer() {
         let model = CanvasModel()
-        model.beginStroke(at: SIMD2(0.5, 0.5), camera: Self.camera(yaw: 0))
+        model.beginStroke(at: SIMD2(0.5, 0.5), camera: Self.testCamera)
         model.endStroke()
-        model.beginStroke(at: SIMD2(0.5, 0.5), camera: Self.camera(yaw: 1))
+        model.selectGenus(.cirrus)
+        model.beginStroke(at: SIMD2(0.4, 0.4), camera: Self.testCamera)
         model.endStroke()
-        #expect(model.cubes.count == 2)
+        model.selectGenus(.cumulus)
+        model.beginStroke(at: SIMD2(0.3, 0.3), camera: Self.testCamera)
+        model.endStroke()
+        #expect(model.layers.count == 2)
+        #expect(model.layer(for: .cumulus)?.strokes.count == 2)
+    }
+
+    @Test("Annuler un trait qui a créé un calque retire ce calque")
+    func undoRemovesNewLayer() {
+        let model = CanvasModel()
+        model.beginStroke(at: SIMD2(0.5, 0.5), camera: Self.testCamera)
+        model.endStroke()
+        model.selectGenus(.altocumulus)
+        model.beginStroke(at: SIMD2(0.5, 0.5), camera: Self.testCamera)
+        model.endStroke()
+        #expect(model.layers.count == 2)
 
         model.undo()
-        #expect(model.cubes.count == 1)
-        #expect(model.cubes.first?.anchorForward == Self.camera(yaw: 0).forward)
+        #expect(model.layers.count == 1)
+        #expect(model.layers.first?.genus == .cumulus)
     }
 
-    @Test("Au plafond, un nouveau regard reste dans le cube courant")
-    func capKeepsCurrentCube() {
+    @Test("Basculer la visibilité d'un calque est annulable")
+    func toggleVisibilityIsUndoable() {
         let model = CanvasModel()
-        for i in 0...CloudCube.maxCount {  // maxCubes + 1 regards distincts
-            model.beginStroke(at: SIMD2(0.5, 0.5), camera: Self.camera(yaw: Float(i) * 0.2))
-            model.endStroke()
-        }
-        #expect(model.cubes.count == CloudCube.maxCount)
-        #expect(model.cubes.last?.strokes.count == 2)  // le dernier regard s'y est replié
+        model.beginStroke(at: SIMD2(0.5, 0.5), camera: Self.testCamera)
+        model.endStroke()
+        #expect(model.layer(for: .cumulus)?.isVisible == true)
+
+        model.setVisible(false, for: .cumulus)
+        #expect(model.layer(for: .cumulus)?.isVisible == false)
+
+        model.undo()
+        #expect(model.layer(for: .cumulus)?.isVisible == true)
     }
 }

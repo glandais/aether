@@ -52,8 +52,8 @@ struct ShellSpec: Sendable, Equatable {
 }
 
 /// Une coquille éditable = un calque. Concentrique aux autres ; porte ses traits
-/// (carte de couverture par direction) et ses paramètres météo. Remplace
-/// `CloudCube` : plus d'`anchorForward`, l'étage vient du `genus`.
+/// (carte de couverture par direction) et ses paramètres météo. L'étage vient du
+/// `genus` (rayons de la coquille), pas d'une direction de regard ancrée.
 struct CloudLayer: Equatable, Sendable, Codable {
     var genus: CloudGenus
     /// Traits du calque — `BrushStroke` inchangé (points écran [0,1]² + pose au

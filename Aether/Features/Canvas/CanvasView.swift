@@ -540,7 +540,6 @@ struct CanvasView: View {
     private func canvas(light: ResolvedLight) -> some View {
         let basis = cameraPose.basis
         let metalView = MetalView(
-            cubes: model.cubes,
             layers: model.layers,
             sunDirection: light.direction,
             skySunDirection: light.skySunDirection,

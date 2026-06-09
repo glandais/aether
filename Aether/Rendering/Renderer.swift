@@ -61,36 +61,6 @@ private struct CloudUniforms {
     var layerCount: UInt32
 }
 
-/// Un cube de nuage prêt pour le GPU : centre + demi-taille monde. Disposition
-/// **identique** à `CloudCubeGPU` dans `Cloud.metal` (deux float4). Sa tranche
-/// dans l'atlas de densité est son index (slab `i` ∈ [i·48, (i+1)·48)).
-private struct CloudCubeGPU {
-    var center: SIMD4<Float>
-    var halfSize: SIMD4<Float>
-}
-
-/// Un « dab » de pinceau envoyé au compute shader. Doit correspondre à `Dab`
-/// dans `BrushPaint.metal`.
-private struct Dab {
-    var center: SIMD2<Float>
-    var radius: Float
-    var softness: Float
-}
-
-/// Uniforms du stampage : boîte monde + pose caméra du trait, pour projeter
-/// chaque voxel vers le canvas peint. Doit correspondre à `StampUniforms` dans
-/// `BrushPaint.metal`.
-private struct StampUniforms {
-    var boxMin: SIMD4<Float>     // xyz: coin min de l'AABB monde
-    var boxSize: SIMD4<Float>    // xyz: taille de l'AABB monde
-    var boxCenter: SIMD4<Float>  // xyz: centre monde (plan de profondeur du trait)
-    var camRight: SIMD4<Float>   // base caméra → monde au moment du trait
-    var camUp: SIMD4<Float>
-    var camForward: SIMD4<Float>
-    var params: SIMD4<Float>     // x: tan(FOV/2) ; y: aspect ; z: sigma profondeur
-    var slab: SIMD4<Float>       // x: index du slab cible ; y: profondeur du slab (voxels)
-}
-
 /// Amortissement temporel (étape 7). Doit correspondre à `CloudTemporal` dans
 /// `Cloud.metal`.
 private struct CloudTemporal {
@@ -153,10 +123,11 @@ private struct GodRayUniforms {
     var params: SIMD4<Float>        // x: densité ; y: décroissance ; z: poids ; w: intensité
 }
 
-/// Rendu de l'étape 4 : le paysage en texture de fond, surmonté d'un nuage dont
-/// la forme provient d'un volume de densité 3D peint au pinceau. La sphère
-/// analytique des étapes 2-3 est remplacée par ce volume ; le bruit
-/// Perlin-Worley (étape 3) en détaille toujours la densité.
+/// Rendu du modèle multi-coquilles (cf. `docs/SHELLS.md`) : le paysage en
+/// texture de fond, surmonté de nuages dont la forme provient de **coquilles
+/// sphériques concentriques** peintes en couverture directionnelle (atlas 2D
+/// par calque). Le bruit Perlin-Worley en détaille la densité ; l'empilement des
+/// coquilles crée les étages (cumulus bas … cirrus haut).
 final class Renderer: NSObject, MTKViewDelegate {
     private let device: MTLDevice
     private let commandQueue: MTLCommandQueue
@@ -167,25 +138,14 @@ final class Renderer: NSObject, MTKViewDelegate {
     // God rays : passe demi-rés (rayons crépusculaires) + composition additive.
     private let godRaysPipeline: MTLRenderPipelineState
     private let godRaysCompositePipeline: MTLRenderPipelineState
-    private let stampPipeline: MTLComputePipelineState
-    private let clearPipeline: MTLComputePipelineState
     // Couverture directionnelle (modèle multi-coquilles, cf. `docs/SHELLS.md` §5) :
-    // cuit les traits des calques dans un atlas équirectangulaire, en parallèle
-    // des cubes (rendu visible) jusqu'à l'étape 8.
+    // cuit les traits des calques dans un atlas équirectangulaire 2D par calque,
+    // échantillonné par le raymarch concentrique.
     private let coverageBaker: CoverageBaker
     // Paysage : placeholder au départ, remplacé par la Feature (galerie curée)
     // via `setLandscape`.
     private var landscapeTexture: MTLTexture
     private let noiseTexture: MTLTexture
-    // Atlas de densité en ping-pong (R8Unorm filtrable) : la repeinte
-    // incrémentale lit l'un, écrit l'autre ; le raymarch échantillonne le courant.
-    // L'atlas empile `CloudCube.maxCount` tranches (slabs) de `volumeDepth` voxels : un slab
-    // par cube de nuage. Le slab `i` occupe la profondeur [i·volumeDepth, …).
-    private let densityVolumes: [MTLTexture]
-    private var currentVolumeIndex = 0
-    // Buffer GPU des cubes (centre + demi-taille) lu par le raymarch (capacité
-    // `CloudCube.maxCount`, rempli chaque frame selon les cubes courants).
-    private let cubeBuffer: MTLBuffer
     private let sampler: MTLSamplerState
     private let startTime = CACurrentMediaTime()
     private let log = Logger(subsystem: "io.github.glandais.aether", category: "Renderer")
@@ -281,55 +241,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     // de la photo, et ambiance ciel). Valeurs de repli avant mise à jour.
     private var sunColor = SIMD3<Float>(6.5, 4.7, 3.4)
     private var skyAmbient = SIMD3<Float>(0.34, 0.40, 0.55)
-    // Profondeur (distance œil → centre du volume), pour l'ancrage en monde.
-    private static let volumeDistance: Float = 5.0
-    // Demi-extents **monde** figés du volume (boîte à position réelle, ne suit
-    // plus le regard ni le FOV courant). « Bande de ciel » : largeur cadrée sur
-    // l'aspect au chargement (le nuage occupe la largeur du cadre), hauteur
-    // **aplatie** (`volumeHeightFactor`) pour un nuage lointain plutôt qu'une
-    // masse proche, profondeur pour l'épaisseur quand on orbite. Calculés une
-    // fois (premier draw).
-    private static let baseTanHalfFov = Float(tan(Scene.defaultFieldOfView / 2))
-    // Largeur un peu plus large que le cadre (présence), hauteur aplatie mais
-    // pas écrasée (un nuage bas et large plutôt qu'une masse haute).
-    private static let volumeWidthFactor: Float = 1.2
-    private static let volumeHeightFactor: Float = 0.7
-    private static let volumeHalfDepth: Float = 1.7
-    // Soulèvement du centre : la base du volume reste au-dessus de l'horizon
-    // (jamais dans la mer), avec ce dégagement de ciel sous le nuage (unités
-    // monde, à la profondeur du volume). Faible → nuage bas, proche de l'eau.
-    private static let volumeSkyGap: Float = 0.18
-    private var volumeHalfExtents: SIMD3<Float>?
-
-    // Résolution d'un slab de densité peint (un cube). La forme y est lisse (le
-    // détail vient du bruit Perlin-Worley), donc une résolution modeste suffit.
-    private static let volumeWidth = 96
-    private static let volumeHeight = 96
-    private static let volumeDepth = 48
-    // Profondeur de l'atlas : un slab de `volumeDepth` voxels par cube, pour les
-    // `CloudCube.maxCount` cubes possibles (source unique de la borne).
-    private static let atlasDepth = volumeDepth * CloudCube.maxCount
-    // Plafond de dabs **par cube** (borne la boucle d'un dispatch de stampage).
-    private static let maxDabs = 768
     private static let cloudColorFormat: MTLPixelFormat = .rgba16Float
-    // Épaisseur du dépôt le long du rayon de visée du trait (gaussienne, unités
-    // monde) : sans elle, projeter le pinceau peindrait un tube infini à travers
-    // la boîte. Centrée sur le plan de profondeur du centre de la boîte.
-    private static let stampDepthSigma: Float = 1.0
-
-    // Cubes à stamper, fournis par la Feature ; réconciliés avec l'atlas au début
-    // de `draw` (où les centres monde sont connus). Un slab d'atlas par cube.
-    private var pendingCubes: [CloudCube] = []
-    // État cuit par cube (parallèle aux slabs de l'atlas) : `stampedStrokes` est
-    // le reflet exact de ce qui est déjà cuit dans le slab ; `stampedDabCount` le
-    // total de dabs cuits (plafonné à `maxDabs`) ; `center` la position monde
-    // avec laquelle le slab a été cuit (un changement force une repeinte).
-    private struct CubeBake {
-        var stampedStrokes: [BrushStroke]
-        var stampedDabCount: Int
-        var center: SIMD3<Float>
-    }
-    private var bakes: [CubeBake] = []
 
     // Calques à cuire en couverture, fournis par la Feature ; réconciliés au
     // début de `draw` via `coverageBaker`.
@@ -357,9 +269,7 @@ final class Renderer: NSObject, MTKViewDelegate {
               let starVertex = library.makeFunction(name: "star_vertex"),
               let starFragment = library.makeFunction(name: "star_fragment"),
               let godRaysVertex = library.makeFunction(name: "god_rays_vertex"),
-              let godRaysFragment = library.makeFunction(name: "god_rays_fragment"),
-              let stampFunction = library.makeFunction(name: "stamp_density_volume"),
-              let clearFunction = library.makeFunction(name: "clear_density_volume") else {
+              let godRaysFragment = library.makeFunction(name: "god_rays_fragment") else {
             return nil
         }
 
@@ -393,8 +303,6 @@ final class Renderer: NSObject, MTKViewDelegate {
             godRaysCompositePipeline = try Renderer.makePipeline(
                 device: device, vertex: compositeVertex, fragment: compositeFragment,
                 pixelFormat: format, blend: .additive)
-            stampPipeline = try device.makeComputePipelineState(function: stampFunction)
-            clearPipeline = try device.makeComputePipelineState(function: clearFunction)
         } catch {
             return nil
         }
@@ -422,23 +330,9 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
         noiseTexture = noise
 
-        guard let volumeA = Renderer.makeDensityVolume(device: device),
-              let volumeB = Renderer.makeDensityVolume(device: device) else {
-            return nil
-        }
-        densityVolumes = [volumeA, volumeB]
-
-        guard let cubes = device.makeBuffer(
-            length: CloudCube.maxCount * MemoryLayout<CloudCubeGPU>.stride,
-            options: .storageModeShared) else {
-            return nil
-        }
-        cubeBuffer = cubes
-
         self.commandQueue = queue
         super.init()
 
-        clearVolume()  // volume vide au départ : ciel sans nuage
         log.debug("Renderer initialisé sur \(device.name, privacy: .public)")
     }
 
@@ -533,14 +427,6 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
     }
 
-    /// Reçoit les cubes du canvas (chacun : ancre de regard + traits, coord.
-    /// normalisées). Le stampage effectif a lieu dans `draw`, où les centres monde
-    /// sont connus (`reconcileVolume`). Plafonné à `CloudCube.maxCount` (slabs de l'atlas).
-    func updateCubes(_ cubes: [CloudCube]) {
-        pendingCubes = cubes.count > CloudCube.maxCount
-            ? Array(cubes.prefix(CloudCube.maxCount)) : cubes
-    }
-
     /// Reçoit les calques du canvas (modèle multi-coquilles). Le stampage en
     /// couverture directionnelle a lieu dans `draw` (`coverageBaker.reconcile`).
     func updateLayers(_ layers: [CloudLayer]) {
@@ -580,45 +466,10 @@ final class Renderer: NSObject, MTKViewDelegate {
         let aspect = Float(fullWidth) / Float(fullHeight)
         let elapsed = Float(CACurrentMediaTime() - startTime)
 
-        // Demi-extents **monde** figés des cubes (taille uniforme, atlas régulier),
-        // calculés une fois (bande de ciel : largeur cadrée, hauteur aplatie).
-        let halfExtents = volumeHalfExtents ?? {
-            let frameHalf = Renderer.volumeDistance * Renderer.baseTanHalfFov
-            let extents = SIMD3<Float>(
-                frameHalf * aspect * Renderer.volumeWidthFactor,
-                frameHalf * Renderer.volumeHeightFactor,
-                Renderer.volumeHalfDepth)
-            volumeHalfExtents = extents
-            return extents
-        }()
-        // Centre monde de chaque cube : le long de son ancre de regard, **soulevé**
-        // pour que sa base reste au-dessus de l'horizon (jamais dans la mer), quel
-        // que soit le regard. L'œil est à l'origine, l'horizon à Y = 0.
-        let centers = pendingCubes.map { Renderer.cubeCenter($0.anchorForward, halfExtents: halfExtents) }
-
-        // Réconcilie l'atlas peint avec les cubes courants (centres monde connus) :
-        // delta incrémental par cube, ou repeinte intégrale sur
-        // annulation/effacement/changement de centre.
-        reconcileVolume(cubes: pendingCubes, centers: centers, halfExtents: halfExtents)
-
         // Réconcilie l'atlas de couverture directionnelle avec les calques
-        // courants (modèle multi-coquilles). Cuit en parallèle des cubes ; le
-        // rendu visible reste celui des cubes jusqu'à l'étape 3.
+        // courants (modèle multi-coquilles) : delta incrémental par calque, ou
+        // recuisson intégrale sur annulation/effacement.
         coverageBaker.reconcile(layers: pendingLayers)
-
-        // Remplit le buffer GPU des cubes (centre + demi-taille uniforme) pour le
-        // raymarch ; `cubeCount` en borne la lecture côté shader.
-        let cubeCount = min(centers.count, CloudCube.maxCount)
-        if cubeCount > 0 {
-            let gpuCubes = (0..<cubeCount).map { i in
-                CloudCubeGPU(
-                    center: SIMD4(centers[i].x, centers[i].y, centers[i].z, 0),
-                    halfSize: SIMD4(halfExtents.x, halfExtents.y, halfExtents.z, 0))
-            }
-            gpuCubes.withUnsafeBytes { raw in
-                cubeBuffer.contents().copyMemory(from: raw.baseAddress!, byteCount: raw.count)
-            }
-        }
 
         // Regard en mouvement (rotation/zoom) depuis la frame précédente : on
         // désactive l'amortissement temporel le temps du mouvement (le nuage est
@@ -794,10 +645,10 @@ final class Renderer: NSObject, MTKViewDelegate {
         frameIndex &+= 1
     }
 
-    // MARK: - Peinture du volume
+    // MARK: - Coquilles
 
     /// Construit les coquilles GPU depuis les calques courants (modèle
-    /// multi-coquilles, étape 4). Plafonne à `CloudLayer.maxCount`, conserve la
+    /// multi-coquilles). Plafonne à `CloudLayer.maxCount`, conserve la
     /// **tranche d'atlas** de chaque calque (= son index original dans
     /// `pendingLayers`, ordre de cuisson du baker) puis trie par rayon `inner`
     /// croissant — la plus basse en premier, pour la marche front-to-back. Le tri
@@ -819,189 +670,6 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         return (shells.count, ShellQuad(shells))
     }
-
-    /// Centre monde d'un cube depuis son ancre de regard : le long de l'ancre à
-    /// `volumeDistance`, **soulevé** pour que la base du cube reste au-dessus de
-    /// l'horizon (jamais dans la mer), quel que soit le regard.
-    private static func cubeCenter(_ anchorForward: SIMD3<Float>, halfExtents: SIMD3<Float>) -> SIMD3<Float> {
-        var center = anchorForward * volumeDistance
-        center.y = max(center.y, halfExtents.y + volumeSkyGap)
-        return center
-    }
-
-    /// Réconcilie l'atlas peint avec les `cubes` courants (un slab par cube). Si
-    /// l'ensemble prolonge l'état cuit (mêmes centres, traits seulement allongés
-    /// ou ajoutés), on ne stampe que le delta de chaque cube ; sinon (annulation,
-    /// effacement, changement de centre) on repeint tout l'atlas, cube par cube.
-    private func reconcileVolume(cubes: [CloudCube], centers: [SIMD3<Float>],
-                                 halfExtents: SIMD3<Float>) {
-        if !cubesAreExtension(cubes: cubes, centers: centers) {
-            // Repeinte intégrale : atlas vide, puis chaque cube dans son slab.
-            clearVolume()
-            bakes = []
-            for c in cubes.indices {
-                var dabCount = 0
-                for stroke in cubes[c].strokes {
-                    if dabCount >= Renderer.maxDabs { break }
-                    dabCount += stampStroke(stroke, points: stroke.points[...], slab: c,
-                                            center: centers[c], halfExtents: halfExtents,
-                                            alreadyStamped: dabCount)
-                }
-                bakes.append(CubeBake(stampedStrokes: cubes[c].strokes,
-                                      stampedDabCount: dabCount, center: centers[c]))
-            }
-            return
-        }
-
-        // Extension pure : delta par cube. Seuls le dernier cube et son dernier
-        // trait changent en pratique, mais on balaie chacun (sans delta = sans
-        // dispatch). Les cubes neufs ont un slab déjà vide (cf. l'invariant de
-        // repeinte : tout slab ≥ `bakes.count` a été remis à zéro).
-        for c in cubes.indices {
-            if c < bakes.count {
-                var dabCount = bakes[c].stampedDabCount
-                let baked = bakes[c].stampedStrokes
-                // Suite du dernier trait déjà cuit…
-                if let lastIdx = baked.indices.last {
-                    let bakedPoints = baked[lastIdx].points.count
-                    let nowPoints = cubes[c].strokes[lastIdx].points.count
-                    if nowPoints > bakedPoints {
-                        dabCount += stampStroke(
-                            cubes[c].strokes[lastIdx],
-                            points: cubes[c].strokes[lastIdx].points[bakedPoints...],
-                            slab: c, center: centers[c], halfExtents: halfExtents,
-                            alreadyStamped: dabCount)
-                    }
-                }
-                // …puis les traits entièrement nouveaux de ce cube.
-                var idx = baked.count
-                while idx < cubes[c].strokes.count {
-                    if dabCount >= Renderer.maxDabs { break }
-                    dabCount += stampStroke(
-                        cubes[c].strokes[idx], points: cubes[c].strokes[idx].points[...],
-                        slab: c, center: centers[c], halfExtents: halfExtents,
-                        alreadyStamped: dabCount)
-                    idx += 1
-                }
-                bakes[c].stampedStrokes = cubes[c].strokes
-                bakes[c].stampedDabCount = dabCount
-            } else {
-                // Cube entièrement neuf (slab vide) : stampe tous ses traits.
-                var dabCount = 0
-                for stroke in cubes[c].strokes {
-                    if dabCount >= Renderer.maxDabs { break }
-                    dabCount += stampStroke(stroke, points: stroke.points[...], slab: c,
-                                            center: centers[c], halfExtents: halfExtents,
-                                            alreadyStamped: dabCount)
-                }
-                bakes.append(CubeBake(stampedStrokes: cubes[c].strokes,
-                                      stampedDabCount: dabCount, center: centers[c]))
-            }
-        }
-    }
-
-    /// L'ensemble des `cubes` prolonge-t-il l'état cuit `bakes` ? Chaque cube déjà
-    /// cuit doit garder son centre et ne faire qu'allonger/ajouter ses traits ;
-    /// le nombre de cubes ne peut qu'augmenter. Sinon → repeinte intégrale.
-    private func cubesAreExtension(cubes: [CloudCube], centers: [SIMD3<Float>]) -> Bool {
-        guard cubes.count >= bakes.count else { return false }
-        for c in bakes.indices {
-            if bakes[c].center != centers[c] { return false }
-            if !Renderer.isExtension(of: bakes[c].stampedStrokes, by: cubes[c].strokes) {
-                return false
-            }
-        }
-        return true
-    }
-
-    /// Les traits `new` prolongent-ils ceux déjà cuits `old` ? (aucun trait
-    /// antérieur modifié ; seul le dernier peut s'allonger). Sinon → repeinte.
-    private static func isExtension(of old: [BrushStroke], by new: [BrushStroke]) -> Bool {
-        guard new.count >= old.count else { return false }
-        guard let last = old.indices.last else { return true }  // rien de cuit
-        for i in 0..<last where new[i] != old[i] { return false }
-        let o = old[last], n = new[last]
-        guard o.radius == n.radius, o.softness == n.softness, o.camera == n.camera,
-              n.points.count >= o.points.count else { return false }
-        return Array(n.points.prefix(o.points.count)) == o.points
-    }
-
-    /// Stampe les points d'un trait dans le slab `slab`, via sa pose caméra,
-    /// plafonné par `maxDabs` (compteur par cube). Renvoie le nombre de dabs cuits.
-    private func stampStroke(_ stroke: BrushStroke, points: ArraySlice<SIMD2<Float>>,
-                             slab: Int, center: SIMD3<Float>, halfExtents: SIMD3<Float>,
-                             alreadyStamped: Int) -> Int {
-        guard !points.isEmpty, alreadyStamped < Renderer.maxDabs else { return 0 }
-        let capped = points.prefix(Renderer.maxDabs - alreadyStamped)
-        let dabs = capped.map { Dab(center: $0, radius: stroke.radius, softness: stroke.softness) }
-        let boxMin = center - halfExtents
-        let boxSize = halfExtents * 2
-        let cam = stroke.camera
-        var uniforms = StampUniforms(
-            boxMin: SIMD4(boxMin.x, boxMin.y, boxMin.z, 0),
-            boxSize: SIMD4(boxSize.x, boxSize.y, boxSize.z, 0),
-            boxCenter: SIMD4(center.x, center.y, center.z, 0),
-            camRight: SIMD4(cam.right.x, cam.right.y, cam.right.z, 0),
-            camUp: SIMD4(cam.up.x, cam.up.y, cam.up.z, 0),
-            camForward: SIMD4(cam.forward.x, cam.forward.y, cam.forward.z, 0),
-            params: SIMD4(cam.tanHalfFov, cam.aspect, Renderer.stampDepthSigma, 0),
-            slab: SIMD4(Float(slab), Float(Renderer.volumeDepth), 0, 0))
-        stampDabs(dabs, uniforms: &uniforms)
-        return dabs.count
-    }
-
-    /// Stampe les dabs fournis (max-combine avec l'existant) en ping-pong : lit
-    /// le volume courant, écrit l'autre, puis bascule. Buffer neuf par appel.
-    private func stampDabs(_ dabs: [Dab], uniforms: inout StampUniforms) {
-        let count = dabs.count
-        guard count > 0 else { return }
-        let stride = MemoryLayout<Dab>.stride
-        guard let dabBuffer = device.makeBuffer(length: count * stride, options: .storageModeShared) else {
-            return
-        }
-        dabs.withUnsafeBytes { raw in
-            dabBuffer.contents().copyMemory(from: raw.baseAddress!, byteCount: count * stride)
-        }
-
-        let source = densityVolumes[currentVolumeIndex]
-        let destination = densityVolumes[1 - currentVolumeIndex]
-        guard let commandBuffer = commandQueue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeComputeCommandEncoder() else {
-            return
-        }
-        var dabCount = UInt32(count)
-        encoder.setComputePipelineState(stampPipeline)
-        encoder.setTexture(source, index: 0)
-        encoder.setTexture(destination, index: 1)
-        encoder.setBuffer(dabBuffer, offset: 0, index: 0)
-        encoder.setBytes(&dabCount, length: MemoryLayout<UInt32>.stride, index: 1)
-        encoder.setBytes(&uniforms, length: MemoryLayout<StampUniforms>.stride, index: 2)
-        encoder.dispatchThreads(volumeGrid, threadsPerThreadgroup: volumeThreads)
-        encoder.endEncoding()
-        commandBuffer.commit()
-        currentVolumeIndex = 1 - currentVolumeIndex
-    }
-
-    /// Remet les deux volumes de densité à zéro.
-    private func clearVolume() {
-        guard let commandBuffer = commandQueue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeComputeCommandEncoder() else {
-            return
-        }
-        encoder.setComputePipelineState(clearPipeline)
-        for volume in densityVolumes {
-            encoder.setTexture(volume, index: 0)
-            encoder.dispatchThreads(volumeGrid, threadsPerThreadgroup: volumeThreads)
-        }
-        encoder.endEncoding()
-        commandBuffer.commit()
-        currentVolumeIndex = 0
-    }
-
-    private var volumeGrid: MTLSize {
-        MTLSize(width: Renderer.volumeWidth, height: Renderer.volumeHeight, depth: Renderer.atlasDepth)
-    }
-    private var volumeThreads: MTLSize { MTLSize(width: 4, height: 4, depth: 4) }
 
     // MARK: - Cibles demi-résolution
 
@@ -1131,22 +799,6 @@ final class Renderer: NSObject, MTKViewDelegate {
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()  // bruit prêt avant le premier rendu
         return texture
-    }
-
-    /// Atlas de densité 3D peint par le pinceau : `CloudCube.maxCount` slabs empilés en
-    /// profondeur (un par cube). Mono-canal **R8Unorm** (filtrable sur GPU iOS,
-    /// contrairement à R32Float) ; rempli en ping-pong par `stamp_density_volume`
-    /// (un slab à la fois, les autres recopiés), vidé par `clear_density_volume`.
-    private static func makeDensityVolume(device: MTLDevice) -> MTLTexture? {
-        let descriptor = MTLTextureDescriptor()
-        descriptor.textureType = .type3D
-        descriptor.pixelFormat = .r8Unorm
-        descriptor.width = volumeWidth
-        descriptor.height = volumeHeight
-        descriptor.depth = atlasDepth
-        descriptor.usage = [.shaderRead, .shaderWrite]
-        descriptor.storageMode = .private
-        return device.makeTexture(descriptor: descriptor)
     }
 
     /// Paysage placeholder : dégradé vertical crépusculaire (sol sombre →

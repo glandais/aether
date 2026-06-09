@@ -57,21 +57,23 @@ scattering atmosphérique sont volontairement reportés à l'étape 5.
 
 Référence : Schneider 2015/2017, Häggström, Bitsquid (voir `BIBLIO.md`).
 
-**Étape 4 (pinceau → champ de densité) — terminée.**
+**Étape 4 (pinceau → champ de densité) — terminée, puis refondue.**
 - [x] `CanvasModel` (`@Observable`) + `DragGesture` : peinture de silhouettes
   en coordonnées normalisées, bouton « Effacer » (registre sobre)
-- [x] `BrushPaint.metal` : compute kernel stampant les dabs dans un volume de
-  densité 3D (96×96×48), silhouette extrudée en profondeur
-- [x] `Cloud.metal` raymarche le volume peint (AABB) au lieu de la sphère ;
-  bruit Perlin-Worley toujours en détail
-- [x] Traits poussés SwiftUI → `Renderer.updateStrokes` → repeinte du volume
+- [x] `BrushPaint.metal` : compute kernel stampant les dabs
+- [x] `Cloud.metal` raymarche la silhouette peinte ; bruit Perlin-Worley en détail
 - [x] Vérifiée visuellement sur simulateur (iPhone 17 Pro)
 
+Le volume 3D peint (atlas de slabs 96×96×48 par cube) a depuis été **remplacé**
+par la **couverture directionnelle** du modèle multi-coquilles (cf. « Calques
+multi-coquilles »). La cible du stamp est passée d'un voxel 3D à une carte 2D
+équirectangulaire par calque ; le détail vertical vient désormais de la géométrie
+de coquille, plus d'une gaussienne de profondeur.
+
 Référence : Schneider 2017 (authoring), Häggström (voir `BIBLIO.md`).
-Simplifications de l'étape, **levées depuis** : repeinte intégrale du volume à
-chaque trait → repeinte incrémentale (cf. « Pinceau ») ; pinceau elliptique à
-l'écran (coords normalisées brutes) → corrigé de l'aspect (cf. « Orientation
-paysage »).
+Simplifications de l'étape, **levées depuis** : repeinte intégrale à chaque trait
+→ repeinte incrémentale (cf. « Pinceau ») ; pinceau elliptique à l'écran (coords
+normalisées brutes) → corrigé de l'aspect (cf. « Orientation paysage »).
 
 **Étape 5 (scattering atmosphérique) — terminée.**
 - [x] Fonction de phase Henyey-Greenstein double-lobe (avant + arrière) selon
@@ -93,8 +95,8 @@ faisait que couper les nuages le long d'une ligne d'horizon arbitraire. Tout le
 pipeline de profondeur (`DepthMap` Domain, `LandscapeFactory.depthMap`,
 `Renderer.setDepthMap`/`makeDepthTexture`, échantillonnage `sceneDepth` +
 soft-particles dans `Cloud.metal`, champ `SceneContext.depthMap`) a été supprimé.
-Les nuages se peignent désormais sur tout le cadre. Le raymarch n'est plus borné
-que par l'AABB du volume.
+Les nuages se peignent désormais sur tout le cadre, dans toutes les directions du
+ciel (couverture directionnelle des coquilles).
 
 **Étape 7 (demi-résolution + amortissement temporel) — terminée.**
 - [x] Raymarch rendu hors écran à demi-résolution (RGBA16Float HDR), puis
@@ -194,26 +196,26 @@ dépendance réseau.
 - **Réglages** (`CanvasView`) : bouton sobre (haut-droite) révélant rayon +
   adoucissement (sliders liés à `CanvasModel.brushRadius`/`brushSoftness`,
   appliqués aux prochains traits).
-- **Repeinte incrémentale (par cube)** : `BrushPaint.metal` →
-  `stamp_density_volume` (max-combine) n'ajoute que les **nouveaux** dabs depuis
-  la dernière mise à jour, dans le **slab** du cube concerné ;
-  `clear_density_volume` vide. `Renderer` suit l'état cuit **par cube**
-  (`CubeBake` : `stampedStrokes`/`stampedDabCount`/centre) → un trait qui
-  s'allonge ne re-stampe que son slab. Incrémental via **ping-pong** de deux
-  atlas **R8Unorm** (lit l'un, écrit l'autre, les autres slabs **recopiés**) —
-  pas de `read_write`, donc format filtrable conservé. Détail de l'atlas et des
-  cubes : « Volume de nuage en monde : un cube par regard ».
-- Vérifié : panneau pinceau affiché, nuage rendu depuis le volume.
+- **Repeinte incrémentale (par calque)** : `BrushPaint.metal` →
+  `stamp_coverage_map` (max-combine) n'ajoute que les **nouveaux** dabs depuis la
+  dernière mise à jour, dans la **tranche** d'atlas du calque concerné ;
+  `clear_coverage_map` vide. `CoverageBaker` suit l'état cuit **par calque** → un
+  trait qui s'allonge ne re-stampe que sa tranche. Incrémental via **ping-pong**
+  de deux atlas **R8Unorm** (lit l'un, écrit l'autre, les autres tranches
+  **recopiées**) — pas de `read_write`, donc format filtrable conservé. Détail de
+  l'atlas et des coquilles : « Calques multi-coquilles ».
+- Vérifié : panneau pinceau affiché, nuage rendu depuis la couverture peinte.
 
 ## Annuler / Rétablir — terminé
 
-- Granularité = un trait achevé (et l'effacement). `CanvasModel` tient deux
-  piles d'instantanés `[[CloudCube]]` ; `beginStroke`/`clear` empilent l'état
-  d'avant et purgent la pile de rétablissement. Annuler un trait qui a **créé** un
-  cube retire ce cube ; un trait d'extension restaure les traits du cube.
-- Aucun changement du `Renderer` : sa réconciliation par cube gère déjà le
-  retrait (compte de cubes/dabs ↓ → repeinte) comme l'ajout (→ stamp du delta).
-  Les états d'historique sont des préfixes imbriqués, donc cohérents.
+- Granularité = un trait achevé (et l'effacement, le toggle de visibilité, le
+  réglage d'opacité). `CanvasModel` tient deux piles d'instantanés `[[CloudLayer]]` ;
+  `beginStroke`/`clear`/`setVisible`/`snapshotForOpacity` empilent l'état d'avant
+  et purgent la pile de rétablissement. Annuler un trait qui a **créé** un calque
+  retire ce calque ; un trait d'extension restaure les traits du calque.
+- Aucun changement du `Renderer` : la réconciliation par calque du `CoverageBaker`
+  gère déjà le retrait (compte de calques/dabs ↓ → recuisson) comme l'ajout
+  (→ stamp du delta).
 - `CanvasView` : barre d'édition sobre (annuler / rétablir / effacer, icônes
   désactivées selon `canUndo`/`canRedo`), affichée dès qu'il y a un historique.
 - Tests : `CanvasModelTests` (annuler/rétablir, purge de la pile, effacement).
@@ -279,16 +281,16 @@ des palettes pourraient devenir calculés. À affiner par capture.
 
 La caméra n'est plus figée face au Nord : un bouton sobre (jumeau du pinceau,
 haut-droite, icône `arrow.up.and.down.and.arrow.left.and.right`) bascule un
-**mode rotation** (`CanvasModel.isRotating`). Les nuages étant à **position réelle
-en monde** (cf. « Volume de nuage en monde : un cube par regard »), pivoter **ou**
-zoomer **n'efface plus** rien : on regarde autour / on les orbite, et repeindre
-dans une nouvelle direction **ouvre un nouveau cube**.
+**mode rotation** (`CanvasModel.isRotating`). Les nuages vivant dans des
+**coquilles concentriques** enveloppant le ciel (cf. « Calques multi-coquilles »),
+pivoter **ou** zoomer **n'efface plus** rien : on regarde autour, et repeindre
+dans une nouvelle direction **dépose de la couverture** dans cette direction.
 
 - **Pivoter le regard** (drag à 1 doigt en mode rotation) : « saisir le ciel »
   (drag droite → ciel glisse à droite / on regarde à gauche ; drag bas → on lève
-  les yeux). Lacet libre, tangage clampé (~±80°). Les nuages étant ancrés en
-  monde, **seuls tournent** le rayon de vue (ciel, mer, nuages) et la direction
-  d'éclairage soleil/lune ; les volumes et le pipeline temporel sont inchangés.
+  les yeux). Lacet libre, tangage clampé (~±80°). La couverture étant indexée par
+  direction, **seuls tournent** le rayon de vue (ciel, mer, nuages) et la
+  direction d'éclairage soleil/lune ; le pipeline temporel est inchangé.
 - **`Domain/CameraPose.swift`** (pur, testé) : base caméra → monde (lacet +
   tangage) = transposée de `CelestialPosition.cameraDirection` (monde → caméra),
   d'où la cohérence ciel ↔ éclairage. `CanvasView` calcule la base
@@ -296,12 +298,12 @@ dans une nouvelle direction **ouvre un nouveau cube**.
   `Background.metal` reconstruit le rayon depuis cette base (identité = ancien
   rayon Nord fixe). `SkyUniforms` **et** `CloudUniforms` portent
   `camRight/camUp/camForward` (le raymarch nuage reconstruit le même rayon pour
-  orbiter les cubes fixes).
+  échantillonner la couverture dans la direction regardée).
 - **Zoom (FOV)** : pincement à 2 doigts, **disponible seulement en mode
   rotation** (mouvement de caméra). Pincer pour écarter → FOV plus étroit (zoom
   avant), clampé ~25°…100°. `fovOverride` (Feature, comme `hourOverride`) →
   `tanHalfFieldOfView` → `cameraTanHalfFov` déjà câblé (ciel + raymarch nuage).
-  Les nuages étant en monde, on zoome **dans/hors** de nuages fixes (vrai zoom
+  Les coquilles enveloppant le ciel, on zoome **dans** des nuages fixes (vrai zoom
   optique, plus d'effacement à la prise).
 - *Sous l'horizon* (`Background.metal`) : teinte de sol unique (couleur `ground`
   de la palette), assombrie selon l'angle de visée (`rayDir.y`) — ancrée à la
@@ -309,67 +311,58 @@ dans une nouvelle direction **ouvre un nouveau cube**.
   vertical baké (faux second ciel / bande claire).
 - Tests : `CameraPoseTests` (base identité, orthonormalité, cas connus,
   **invariant de cohérence** avec `cameraDirection`) ; `CanvasModelTests` (clamp
-  tangage, règles de création de cube — cf. section dédiée). Vérifié au simulateur
-  (ciel panoramique + soleil qui se déplacent ; FOV étroit/large).
+  tangage, règles de création de calque — cf. section dédiée). Vérifié au
+  simulateur (ciel panoramique + soleil qui se déplacent ; FOV étroit/large).
 
-## Volume de nuage en monde : un cube par regard (multi-cubes) — terminé
+## Calques multi-coquilles — terminé
 
-Le nuage n'est plus une boîte unique cadrée sur l'écran : il vit à **position
-réelle en monde**, et **chaque changement de regard ouvre un nouveau cube** ancré
-sur la direction de regard courante. Le raymarch les parcourt tous → le ciel se
-peint sur un large arc, plus seulement devant la direction de base.
+Le nuage ne vient plus d'un volume 3D peint dans des cubes ancrés au regard, mais
+de **coquilles sphériques concentriques** enveloppant une « petite planète » (la
+référence `realtime_clouds`). Un calque éditable = une coquille à une altitude ;
+l'**empilement** des coquilles crée les étages (cumulus bas … cirrus haut). La
+peinture devient une **carte de couverture 2D directionnelle** (azimut ×
+élévation), pas un volume. Plan complet et décisions : [`SHELLS.md`](SHELLS.md).
 
-- **`Domain/CloudCube.swift`** (pur) : `{ anchorForward, strokes }`. `anchorForward`
-  (avant du regard figé à la création) ancre le cube en monde : centre =
-  `anchorForward × volumeDistance`, **soulevé** pour que sa base reste au-dessus
-  de l'horizon (jamais dans la mer). `CloudCube.maxCount` (= 12) est la **source
-  unique** de la borne : reprise par la création (`CanvasModel`), l'atlas
-  (`Renderer`) et le raymarch (passée en uniform `atlasSlabs` à `Cloud.metal`,
-  pas de littéral dupliqué côté shader).
+- **`Domain/CloudLayer.swift`** (pur) : `{ genus, strokes, coverageBias, opacity,
+  isVisible }`. Le `genus` (`CloudGenus` : cirrus / altocumulus / cumulus) fixe la
+  coquille (`ShellSpec` : `inner`/`outer`/`cloudType`/`noiseScale`/`drift`).
+  `CloudLayer.maxCount` (= 4) est la **source unique** de la borne : création
+  (`CanvasModel`), atlas de couverture (`CoverageBaker`) et raymarch concentrique
+  (`Cloud.metal`, `kMaxShells`).
 - **Persistance par trait** (`Domain/BrushStroke.swift`) : chaque trait fige sa
-  pose caméra (`StrokeCamera` : base + FOV + aspect). `BrushPaint.metal` projette
-  le voxel **monde** via cette pose, donc un trait se dépose là où le rayon écran
-  a percé la boîte et **reste en place** quand on tourne/zoome ensuite — d'où
-  « regard libre » sans effacement.
-- **`CanvasModel`** possède `cubes: [CloudCube]`. Il existe toujours un **cube
-  courant** (le dernier) : tout trait y va. Quand le regard a changé depuis la
-  création du cube courant (`dot(anchorForward, gaze) ≤ 1 − ε`), le prochain
-  `beginStroke` **ouvre** un nouveau cube ancré sur le regard courant ; on ne
-  revient jamais dans un cube antérieur. Au plafond (`maxCount`), les traits
-  restent dans le cube courant (aucune perte). Undo/redo : instantanés
-  `[[CloudCube]]`.
-- **Atlas de densité** (`Renderer`) : un seul volume 3D **R8Unorm** empilant
-  `maxCount` **slabs** de 96×96×48 (un par cube), en **ping-pong**. Réconciliation
-  **par cube** (`CubeBake` : traits cuits + nombre de dabs + centre, parallèle aux
-  slabs) : un trait qui s'allonge ne re-stampe que son slab ; annulation /
-  effacement / changement de centre → repeinte intégrale de l'atlas (cube par
-  cube). `stamp_density_volume` écrit le **slab cible** et **recopie** les autres
-  au flip ping-pong (ils restent intacts). Un cube neuf hérite d'un slab déjà
-  vide (invariant garanti par la repeinte).
-- **Raymarch multi-boîtes** (`Cloud.metal`) : pour chaque rayon, on **collecte**
-  les cubes touchés (intersection boîte/rayon par cube), on les **trie** par
-  distance, puis on marche **front-to-back** en propageant transmittance et
-  in-scatter **à travers** les cubes. Un **budget de pas global** (taille de pas
-  unique partagée entre les segments touchés) garde le coût proche du cas
-  mono-cube quel que soit le nombre de cubes. L'échantillonnage remappe la
-  profondeur locale dans le slab du cube : `(cubeIndex + uvw.z) / atlasSlabs`. Le
-  bruit Perlin-Worley reste indexé par `p` monde → détail continu entre cubes.
-  Recouvrement entre cubes voisins : compositing front-to-back correct (léger
-  double-comptage de densité, visuellement bénin). Demi-rés + amortissement
-  temporel **inchangés** (indépendants du nombre de cubes).
-- **Plomberie** : `Renderer.updateCubes` remplace `updateStrokes` ;
-  `MetalView`/`CanvasView` passent `model.cubes`. `CloudUniforms` perd
-  `volumeCenter`/`volumeHalfSize` (boîte unique) et gagne `cubeCount`/`atlasSlabs` ;
-  les cubes (centre + demi-taille) voyagent dans un buffer (`CloudCubeGPU`).
-- Tests : `CanvasModelTests` (même regard → un cube ; nouveau regard → nouveau
-  cube ancré dessus ; undo retire le cube créé ; plafond → repli sur le cube
-  courant). Vérifié au simulateur : trois masses nuageuses distinctes, peintes à
-  des regards différents, rendues simultanément au-dessus de la mer.
-
-**Borne unique (`CloudCube.maxCount`).** La capacité (12) n'existe qu'une fois.
-Côté shader, seule subsiste `kMaxCubeHits` (16) — un **plafond de capacité** des
-tableaux de hits par rayon (taille de tableau exigée à la compilation MSL,
-distincte du compte de cubes lu dans `atlasSlabs`), à garder ≥ `maxCount`.
+  pose caméra (`StrokeCamera`). `stamp_coverage_map` projette une **direction de
+  ciel** via cette pose, donc un trait se dépose dans la direction où le rayon
+  écran pointait et **reste en place** quand on tourne/zoome — d'où « regard
+  libre » sans effacement. Rien sous l'horizon (la carte s'arrête à l'élévation 0).
+- **`CanvasModel`** possède `layers: [CloudLayer]`. Tout trait va dans le **calque
+  actif** (`activeGenus`, créé à la volée au premier trait d'un genre). Plus de
+  « nouveau cube quand le regard change » : le regard oriente la peinture, il ne
+  crée plus de domaine. Undo/redo : instantanés `[[CloudLayer]]`.
+- **Atlas de couverture** (`CoverageBaker`) : un atlas `texture2d_array`
+  équirectangulaire (hémisphère sup., **R8Unorm** filtrable), une **tranche** par
+  calque, en **ping-pong**. Réconciliation **par calque** (traits cuits + nombre
+  de dabs) : un trait qui s'allonge ne re-stampe que sa tranche ; annulation /
+  effacement → recuisson intégrale. `stamp_coverage_map` écrit la **tranche cible**
+  et **recopie** les autres au flip ping-pong.
+- **Raymarch concentrique** (`Cloud.metal`) : un rayon montant (`rd.y > 0`)
+  traverse les coquilles **triées par altitude croissante** → front-to-back **sans
+  tri** par pixel. La couverture, constante le long du rayon, se sample **une fois
+  par coquille** dans la direction de vue. Dans chaque coquille : `height_fraction`
+  × `densityHeightGradient(cloudType)` (profil vertical du genre) × couverture
+  peinte × bruit Perlin-Worley 3D (indexé en `p`, `noiseScale` en coordonnées
+  planète ~3·10⁻⁴). Transmittance/in-scatter **partagés** entre coquilles (un
+  cirrus translucide laisse voir le cumulus dessous) ; pas borné `dmod` au ras de
+  l'horizon ; auto-ombrage seul (light march borné à la coquille). Demi-rés +
+  amortissement temporel **inchangés**.
+- **Plomberie** : `Renderer.updateLayers` ; `MetalView`/`CanvasView` passent
+  `model.layers`. `CloudUniforms` porte un tableau de `Shell` (≤ `maxCount`,
+  triées) + `layerCount` ; chaque `Shell` connaît sa tranche d'atlas
+  (index de cuisson, distinct du rang d'altitude).
+- Tests : `CanvasModelTests` (même genre → un calque ; nouveau genre → nouveau
+  calque ; retour à un genre → réutilise son calque ; undo retire le calque créé ;
+  toggle de visibilité annulable) ; `CloudLayerTests` (rayons d'étages disjoints
+  croissants, `noiseScale` planète, `maxCount`). Vérifié au simulateur : un ciel à
+  deux étages peints (cumulus + cirrus), enregistré puis rouvert à l'identique.
 
 ## Mer raymarchée sous l'horizon — terminé
 
@@ -542,7 +535,7 @@ restaient deux finitions côté Feature/pinceau :
   de la Dynamic Island, barres centrées).
 - **Pinceau circulaire quelle que soit l'orientation** : les dabs sont stockés en
   coords normalisées `[0,1]²` et stampés en *distance écran-proportionnelle*
-  (`stamp_density_volume` reçoit `aspect` et met `delta.x *= aspect`) → un coup de
+  (`stamp_coverage_map` reçoit `aspect` et met `delta.x *= aspect`) → un coup de
   pinceau projette un cercle à l'écran, en portrait **comme** en paysage (corrige
   aussi l'ellipticité préexistante en portrait). Chaque trait **fige son aspect**
   dans sa `StrokeCamera` : un nuage peint en portrait reste rond une fois

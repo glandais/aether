@@ -1,29 +1,28 @@
 import Observation
 import simd
 
-/// État du canvas de peinture : les **cubes** de nuage déjà peints. Chaque cube
-/// est ancré sur une direction de regard et porte ses traits (en coordonnées
-/// normalisées [0,1]², origine en haut à gauche). Le rendu consomme `cubes`.
+/// État du canvas de peinture : les **calques** de nuage déjà peints (modèle
+/// multi-coquilles, cf. `docs/SHELLS.md`). Chaque calque est une coquille
+/// concentrique éditable, désignée par son genre (étage), et porte ses traits
+/// (en coordonnées normalisées [0,1]², origine en haut à gauche). Le rendu
+/// consomme `layers` : la couverture directionnelle s'en cuit, l'empilement des
+/// coquilles crée les étages.
 ///
-/// Plusieurs cubes : il existe toujours un **cube courant** (le dernier). Tout
-/// trait y est ajouté. Quand le regard a changé depuis la création du cube
-/// courant, le prochain trait ouvre un **nouveau** cube ancré sur le regard
-/// courant (qui devient le cube courant) ; on ne revient jamais dans un cube
-/// antérieur.
+/// Le calque actif (`activeGenus`) reçoit tout nouveau trait ; on crée le calque
+/// à la volée au premier trait d'un genre. Plus de cubes ancrés sur le regard :
+/// le regard oriente la peinture, il ne crée plus de domaine.
 ///
 /// Historique annuler/rétablir à la granularité du trait : chaque trait achevé
-/// (et chaque effacement) est une action réversible — on instantané la liste de
-/// cubes. Le `Renderer` repeint automatiquement (mise à jour incrémentale par
-/// cube : ajout comme retrait).
+/// (et chaque effacement / toggle de visibilité / réglage d'opacité) est une
+/// action réversible — on instantané la liste de calques. Le `Renderer` recuit
+/// la couverture (mise à jour incrémentale : ajout comme retrait).
 @MainActor
 @Observable
 final class CanvasModel {
-    private(set) var cubes: [CloudCube] = []
     /// Calques du modèle multi-coquilles (cf. `docs/SHELLS.md`). Chaque calque
     /// est une coquille concentrique éditable ; le calque actif (`activeGenus`)
-    /// reçoit tout nouveau trait. Renseigné **en parallèle** des `cubes` tant que
-    /// le rendu visible reste celui des cubes (suppression à l'étape 8). La
-    /// couverture directionnelle (`Renderer`) se cuit depuis ces traits.
+    /// reçoit tout nouveau trait. La couverture directionnelle (`Renderer`) se
+    /// cuit depuis ces traits.
     private(set) var layers: [CloudLayer] = []
     /// Genre du calque actif (étage de peinture). Défaut : cumulus (étage bas).
     var activeGenus: CloudGenus = .cumulus
@@ -56,67 +55,36 @@ final class CanvasModel {
     /// Distance minimale entre deux points d'un même trait (décimation).
     private let minSpacing: Float = 0.012
 
-    /// Au-delà de ce cosinus d'écart angulaire entre deux regards, on les
-    /// considère identiques (même cube). Les deux regards sont alors bit-à-bit
-    /// égaux en pratique ; la marge absorbe le bruit flottant.
-    private static let sameViewCos: Float = 0.99999
-
-    /// Instantané réversible : cubes (rendu visible) **et** calques (couverture
-    /// directionnelle), cuits en parallèle pendant la transition multi-coquilles.
-    private struct Snapshot {
-        var cubes: [CloudCube]
-        var layers: [CloudLayer]
-    }
-
-    /// Piles d'historique : instantanés de l'état (cubes + calques).
-    private var undoStack: [Snapshot] = []
-    private var redoStack: [Snapshot] = []
+    /// Piles d'historique : instantanés de la liste de calques.
+    private var undoStack: [[CloudLayer]] = []
+    private var redoStack: [[CloudLayer]] = []
 
     var canUndo: Bool { !undoStack.isEmpty }
     var canRedo: Bool { !redoStack.isEmpty }
 
     /// Tous les traits, aplatis (lecture seule) : pour l'état d'édition de l'UI
-    /// (y a-t-il à effacer ?). Un cube porte toujours ≥ 1 trait, donc
-    /// `!cubes.isEmpty` suffit aussi.
-    var strokes: [BrushStroke] { cubes.flatMap(\.strokes) }
+    /// (y a-t-il à effacer ?).
+    var strokes: [BrushStroke] { layers.flatMap(\.strokes) }
 
     func beginStroke(at point: SIMD2<Float>, camera: StrokeCamera) {
         recordHistory()  // instantané d'avant-trait : l'annulation y revient
         let stroke = BrushStroke(
             points: [point], radius: brushRadius, softness: brushSoftness, camera: camera)
-        // Le regard a-t-il changé depuis la création du cube courant ? Si oui (ou
-        // s'il n'y a pas encore de cube), on ouvre un nouveau cube ancré sur le
-        // regard courant — sauf au plafond, où l'on reste dans le cube courant.
-        let sameView = cubes.last.map {
-            dot($0.anchorForward, camera.forward) > Self.sameViewCos
-        } ?? false
-        if !sameView && cubes.count < CloudCube.maxCount {
-            cubes.append(CloudCube(anchorForward: camera.forward, strokes: [stroke]))
-        } else {
-            // Cube courant : même regard, ou plafond atteint (repli sans perte).
-            cubes[cubes.count - 1].strokes.append(stroke)
-        }
-        // Modèle multi-coquilles : le trait va aussi dans le calque actif (créé à
-        // la volée), cuit en couverture directionnelle par le Renderer.
+        // Le trait va dans le calque actif (créé à la volée), cuit en couverture
+        // directionnelle par le Renderer.
         appendStrokeToActiveLayer(stroke)
         isDrawing = true
     }
 
     func extendStroke(to point: SIMD2<Float>) {
-        guard let ci = cubes.indices.last,
-              var stroke = cubes[ci].strokes.last else { return }
-        if let last = stroke.points.last, distance(last, point) < minSpacing {
-            return
-        }
-        stroke.points.append(point)
-        cubes[ci].strokes[cubes[ci].strokes.count - 1] = stroke
-        // Reflète l'allongement dans le calque actif (dernier trait du calque).
-        extendActiveLayerStroke(with: point)
+        guard let li = layers.firstIndex(where: { $0.genus == activeGenus }),
+              let last = layers[li].strokes.last?.points.last,
+              distance(last, point) >= minSpacing else { return }
+        layers[li].strokes[layers[li].strokes.count - 1].points.append(point)
     }
 
-    /// Ajoute un trait au calque actif (créé si absent), ou — comme pour les cubes
-    /// — à un calque existant du même genre. Garde calques et cubes synchrones. Un
-    /// calque neuf hérite des défauts météo (`defaultCoverageBias`/`defaultOpacity`).
+    /// Ajoute un trait au calque actif (créé si absent). Un calque neuf hérite des
+    /// défauts météo (`defaultCoverageBias`/`defaultOpacity`).
     private func appendStrokeToActiveLayer(_ stroke: BrushStroke) {
         if let li = layers.firstIndex(where: { $0.genus == activeGenus }) {
             layers[li].strokes.append(stroke)
@@ -135,14 +103,6 @@ final class CanvasModel {
     func applySceneDefaults(_ parameters: CloudParameters) {
         defaultCoverageBias = parameters.coverageBias
         defaultOpacity = min(max(parameters.densityScale, 0), 1)
-    }
-
-    /// Allonge le dernier trait du calque actif (miroir d'`extendStroke`).
-    private func extendActiveLayerStroke(with point: SIMD2<Float>) {
-        guard let li = layers.firstIndex(where: { $0.genus == activeGenus }),
-              var stroke = layers[li].strokes.last else { return }
-        stroke.points.append(point)
-        layers[li].strokes[layers[li].strokes.count - 1] = stroke
     }
 
     func endStroke() {
@@ -187,26 +147,23 @@ final class CanvasModel {
     }
 
     func clear() {
-        guard !cubes.isEmpty else { return }
+        guard !layers.isEmpty else { return }
         recordHistory()
-        cubes = []
         layers = []
         isDrawing = false
     }
 
     func undo() {
         guard let previous = undoStack.popLast() else { return }
-        redoStack.append(Snapshot(cubes: cubes, layers: layers))
-        cubes = previous.cubes
-        layers = previous.layers
+        redoStack.append(layers)
+        layers = previous
         isDrawing = false
     }
 
     func redo() {
         guard let next = redoStack.popLast() else { return }
-        undoStack.append(Snapshot(cubes: cubes, layers: layers))
-        cubes = next.cubes
-        layers = next.layers
+        undoStack.append(layers)
+        layers = next
         isDrawing = false
     }
 
@@ -217,15 +174,13 @@ final class CanvasModel {
     /// Les calques sont posés **tels quels** : leurs surcharges météo
     /// (`coverageBias`/`opacity`/`isVisible`) sauvegardées priment sur les défauts
     /// de scène — un calque rechargé n'hérite pas des défauts météo courants.
-    /// Les cubes (rendu visible jusqu'à l'étape 8) sont reconstruits depuis les
-    /// traits des calques, chaque trait portant déjà sa `StrokeCamera` : la
-    /// peinture se reprojette à l'identique.
+    /// Chaque trait portant déjà sa `StrokeCamera`, la peinture se reprojette à
+    /// l'identique.
     func load(
         layers: [CloudLayer], viewYaw: Float, viewPitch: Float,
         brushRadius: Float, brushSoftness: Float
     ) {
         self.layers = layers
-        self.cubes = Self.rebuildCubes(from: layers.flatMap(\.strokes))
         self.viewYaw = viewYaw
         self.viewPitch = min(max(viewPitch, -Self.maxPitch), Self.maxPitch)
         self.brushRadius = brushRadius
@@ -233,26 +188,6 @@ final class CanvasModel {
         isDrawing = false
         undoStack.removeAll()
         redoStack.removeAll()
-    }
-
-    /// Regroupe une liste plate de traits en cubes, en suivant la même règle que
-    /// `beginStroke` : un nouveau cube naît dès que la pose de regard d'un trait
-    /// s'écarte de celle du cube courant (au-delà de `sameViewCos`), plafonnée à
-    /// `CloudCube.maxCount`. Conserve la parité du rendu cube à la réouverture.
-    private static func rebuildCubes(from strokes: [BrushStroke]) -> [CloudCube] {
-        var cubes: [CloudCube] = []
-        for stroke in strokes {
-            let forward = stroke.camera.forward
-            let sameView = cubes.last.map {
-                dot($0.anchorForward, forward) > sameViewCos
-            } ?? false
-            if !sameView && cubes.count < CloudCube.maxCount {
-                cubes.append(CloudCube(anchorForward: forward, strokes: [stroke]))
-            } else {
-                cubes[cubes.count - 1].strokes.append(stroke)
-            }
-        }
-        return cubes
     }
 
     /// Oriente le regard. Le lacet est libre (panoramique) ; le tangage est
@@ -265,7 +200,7 @@ final class CanvasModel {
     /// Empile l'état courant et invalide la pile de rétablissement (nouvelle
     /// branche d'historique).
     private func recordHistory() {
-        undoStack.append(Snapshot(cubes: cubes, layers: layers))
+        undoStack.append(layers)
         redoStack.removeAll()
     }
 }
