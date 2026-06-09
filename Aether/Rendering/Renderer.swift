@@ -131,6 +131,10 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let godRaysCompositePipeline: MTLRenderPipelineState
     private let stampPipeline: MTLComputePipelineState
     private let clearPipeline: MTLComputePipelineState
+    // Couverture directionnelle (modèle multi-coquilles, cf. `docs/SHELLS.md` §5) :
+    // cuit les traits des calques dans un atlas équirectangulaire, en parallèle
+    // des cubes (rendu visible) jusqu'à l'étape 8.
+    private let coverageBaker: CoverageBaker
     // Paysage : placeholder au départ, remplacé par la Feature (galerie curée)
     // via `setLandscape`.
     private var landscapeTexture: MTLTexture
@@ -293,6 +297,10 @@ final class Renderer: NSObject, MTKViewDelegate {
     }
     private var bakes: [CubeBake] = []
 
+    // Calques à cuire en couverture, fournis par la Feature ; réconciliés au
+    // début de `draw` via `coverageBaker`.
+    private var pendingLayers: [CloudLayer] = []
+
     // Créé depuis `MetalView` (UIViewRepresentable, @MainActor) ; l'init touche
     // les propriétés main-actor de `MTKView` (device, colorPixelFormat).
     @MainActor
@@ -356,6 +364,11 @@ final class Renderer: NSObject, MTKViewDelegate {
         } catch {
             return nil
         }
+
+        guard let baker = CoverageBaker(device: device, commandQueue: queue, library: library) else {
+            return nil
+        }
+        coverageBaker = baker
 
         guard let texture = Renderer.makeLandscapeTexture(device: device) else {
             return nil
@@ -499,6 +512,12 @@ final class Renderer: NSObject, MTKViewDelegate {
             ? Array(cubes.prefix(CloudCube.maxCount)) : cubes
     }
 
+    /// Reçoit les calques du canvas (modèle multi-coquilles). Le stampage en
+    /// couverture directionnelle a lieu dans `draw` (`coverageBaker.reconcile`).
+    func updateLayers(_ layers: [CloudLayer]) {
+        pendingLayers = layers
+    }
+
     func draw(in view: MTKView) {
         // FPS : nombre d'images sur la dernière seconde, journalisé via os.log.
         fpsFrameCount += 1
@@ -552,6 +571,11 @@ final class Renderer: NSObject, MTKViewDelegate {
         // delta incrémental par cube, ou repeinte intégrale sur
         // annulation/effacement/changement de centre.
         reconcileVolume(cubes: pendingCubes, centers: centers, halfExtents: halfExtents)
+
+        // Réconcilie l'atlas de couverture directionnelle avec les calques
+        // courants (modèle multi-coquilles). Cuit en parallèle des cubes ; le
+        // rendu visible reste celui des cubes jusqu'à l'étape 3.
+        coverageBaker.reconcile(layers: pendingLayers)
 
         // Remplit le buffer GPU des cubes (centre + demi-taille uniforme) pour le
         // raymarch ; `cubeCount` en borne la lecture côté shader.

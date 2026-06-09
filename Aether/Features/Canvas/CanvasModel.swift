@@ -19,6 +19,14 @@ import simd
 @Observable
 final class CanvasModel {
     private(set) var cubes: [CloudCube] = []
+    /// Calques du modèle multi-coquilles (cf. `docs/SHELLS.md`). Chaque calque
+    /// est une coquille concentrique éditable ; le calque actif (`activeGenus`)
+    /// reçoit tout nouveau trait. Renseigné **en parallèle** des `cubes` tant que
+    /// le rendu visible reste celui des cubes (suppression à l'étape 8). La
+    /// couverture directionnelle (`Renderer`) se cuit depuis ces traits.
+    private(set) var layers: [CloudLayer] = []
+    /// Genre du calque actif (étage de peinture). Défaut : cumulus (étage bas).
+    var activeGenus: CloudGenus = .cumulus
     private(set) var isDrawing = false
 
     /// Rayon et adoucissement du pinceau, en coordonnées normalisées.
@@ -44,9 +52,16 @@ final class CanvasModel {
     /// égaux en pratique ; la marge absorbe le bruit flottant.
     private static let sameViewCos: Float = 0.99999
 
-    /// Piles d'historique : instantanés de l'état `cubes`.
-    private var undoStack: [[CloudCube]] = []
-    private var redoStack: [[CloudCube]] = []
+    /// Instantané réversible : cubes (rendu visible) **et** calques (couverture
+    /// directionnelle), cuits en parallèle pendant la transition multi-coquilles.
+    private struct Snapshot {
+        var cubes: [CloudCube]
+        var layers: [CloudLayer]
+    }
+
+    /// Piles d'historique : instantanés de l'état (cubes + calques).
+    private var undoStack: [Snapshot] = []
+    private var redoStack: [Snapshot] = []
 
     var canUndo: Bool { !undoStack.isEmpty }
     var canRedo: Bool { !redoStack.isEmpty }
@@ -72,6 +87,9 @@ final class CanvasModel {
             // Cube courant : même regard, ou plafond atteint (repli sans perte).
             cubes[cubes.count - 1].strokes.append(stroke)
         }
+        // Modèle multi-coquilles : le trait va aussi dans le calque actif (créé à
+        // la volée), cuit en couverture directionnelle par le Renderer.
+        appendStrokeToActiveLayer(stroke)
         isDrawing = true
     }
 
@@ -83,6 +101,26 @@ final class CanvasModel {
         }
         stroke.points.append(point)
         cubes[ci].strokes[cubes[ci].strokes.count - 1] = stroke
+        // Reflète l'allongement dans le calque actif (dernier trait du calque).
+        extendActiveLayerStroke(with: point)
+    }
+
+    /// Ajoute un trait au calque actif (créé si absent), ou — comme pour les cubes
+    /// — à un calque existant du même genre. Garde calques et cubes synchrones.
+    private func appendStrokeToActiveLayer(_ stroke: BrushStroke) {
+        if let li = layers.firstIndex(where: { $0.genus == activeGenus }) {
+            layers[li].strokes.append(stroke)
+        } else {
+            layers.append(CloudLayer(genus: activeGenus, strokes: [stroke]))
+        }
+    }
+
+    /// Allonge le dernier trait du calque actif (miroir d'`extendStroke`).
+    private func extendActiveLayerStroke(with point: SIMD2<Float>) {
+        guard let li = layers.firstIndex(where: { $0.genus == activeGenus }),
+              var stroke = layers[li].strokes.last else { return }
+        stroke.points.append(point)
+        layers[li].strokes[layers[li].strokes.count - 1] = stroke
     }
 
     func endStroke() {
@@ -93,20 +131,23 @@ final class CanvasModel {
         guard !cubes.isEmpty else { return }
         recordHistory()
         cubes = []
+        layers = []
         isDrawing = false
     }
 
     func undo() {
         guard let previous = undoStack.popLast() else { return }
-        redoStack.append(cubes)
-        cubes = previous
+        redoStack.append(Snapshot(cubes: cubes, layers: layers))
+        cubes = previous.cubes
+        layers = previous.layers
         isDrawing = false
     }
 
     func redo() {
         guard let next = redoStack.popLast() else { return }
-        undoStack.append(cubes)
-        cubes = next
+        undoStack.append(Snapshot(cubes: cubes, layers: layers))
+        cubes = next.cubes
+        layers = next.layers
         isDrawing = false
     }
 
@@ -118,6 +159,12 @@ final class CanvasModel {
         brushRadius: Float, brushSoftness: Float
     ) {
         self.cubes = cubes
+        // Reconstruit les calques depuis les traits rechargés : tant que la
+        // persistance multi-coquilles (étape 7) n'existe pas, les `.aether` ne
+        // portent que des cubes. Tous les traits vont dans le calque actif courant.
+        self.layers = cubes.isEmpty
+            ? []
+            : [CloudLayer(genus: activeGenus, strokes: cubes.flatMap(\.strokes))]
         self.viewYaw = viewYaw
         self.viewPitch = min(max(viewPitch, -Self.maxPitch), Self.maxPitch)
         self.brushRadius = brushRadius
@@ -137,7 +184,7 @@ final class CanvasModel {
     /// Empile l'état courant et invalide la pile de rétablissement (nouvelle
     /// branche d'historique).
     private func recordHistory() {
-        undoStack.append(cubes)
+        undoStack.append(Snapshot(cubes: cubes, layers: layers))
         redoStack.removeAll()
     }
 }

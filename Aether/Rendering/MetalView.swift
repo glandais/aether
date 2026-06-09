@@ -8,6 +8,10 @@ import SwiftUI
 /// soleil et la météo sont poussés à chaque mise à jour.
 struct MetalView: UIViewRepresentable {
     var cubes: [CloudCube]
+    /// Calques multi-coquilles (cf. `docs/SHELLS.md`) : cuits en couverture
+    /// directionnelle par le Renderer, en parallèle des cubes (rendu visible)
+    /// jusqu'à leur suppression (étape 8).
+    var layers: [CloudLayer]
     var sunDirection: SIMD3<Float>
     var skySunDirection: SIMD3<Float>
     /// Couleurs des disques solaire/lunaire dessinés dans le ciel (la position de
@@ -76,6 +80,7 @@ struct MetalView: UIViewRepresentable {
         renderer.updateFieldOfView(cameraTanHalfFov)
         renderer.updateCameraBasis(right: cameraRight, up: cameraUp, forward: cameraForward)
         renderer.updateCubes(cubes)
+        renderer.updateLayers(layers)
     }
 
     @MainActor

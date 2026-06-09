@@ -534,6 +534,7 @@ struct CanvasView: View {
         let basis = cameraPose.basis
         let metalView = MetalView(
             cubes: model.cubes,
+            layers: model.layers,
             sunDirection: light.direction,
             skySunDirection: light.skySunDirection,
             sunDiscColor: light.sunDiscColor,
