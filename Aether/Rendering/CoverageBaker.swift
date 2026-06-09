@@ -168,7 +168,10 @@ final class CoverageBaker {
     }
 
     /// Stampe les dabs (max-combine avec l'existant) en ping-pong : lit l'atlas
-    /// courant, écrit l'autre, puis bascule. Buffer neuf par appel.
+    /// courant, écrit l'autre, puis bascule. Le kernel n'écrit que la tranche
+    /// cible : un blit recopie d'abord toutes les tranches source → destination,
+    /// sans quoi la bascule perdrait la couverture des autres calques.
+    /// Buffer neuf par appel.
     private func stampDabs(_ dabs: [Dab], uniforms: inout CoverageStampUniforms) {
         let count = dabs.count
         guard count > 0 else { return }
@@ -183,7 +186,14 @@ final class CoverageBaker {
         let source = atlases[currentIndex]
         let destination = atlases[1 - currentIndex]
         guard let commandBuffer = commandQueue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeComputeCommandEncoder() else {
+              let blit = commandBuffer.makeBlitCommandEncoder() else {
+            return
+        }
+        blit.copy(from: source, sourceSlice: 0, sourceLevel: 0,
+                  to: destination, destinationSlice: 0, destinationLevel: 0,
+                  sliceCount: CloudLayer.maxCount, levelCount: 1)
+        blit.endEncoding()
+        guard let encoder = commandBuffer.makeComputeCommandEncoder() else {
             return
         }
         var dabCount = UInt32(count)

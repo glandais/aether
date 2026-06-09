@@ -130,16 +130,17 @@ struct AetherDocument: FileDocument {
         self = try Self.decode(from: data)
     }
 
-    /// Décode un contenu `.aether` en refusant proprement un schéma antérieur.
+    /// Décode un contenu `.aether` en refusant proprement tout autre schéma.
     /// On lit d'abord la seule `version` (tolérant aux champs absents/renommés
-    /// entre versions) : un fichier v1 (cubes) ne se décode pas en `Payload` v2 et
-    /// doit échouer en `unsupportedVersion`, pas en `corrupted`.
+    /// entre versions) : un fichier v1 (cubes) comme un futur v3 ne se décodent
+    /// pas en `Payload` v2 et doivent échouer en `unsupportedVersion`, pas en
+    /// `corrupted`.
     static func decode(from data: Data) throws -> AetherDocument {
         let decoder = JSONDecoder()
         guard let envelope = try? decoder.decode(VersionEnvelope.self, from: data) else {
             throw AetherDocumentError.corrupted
         }
-        guard envelope.version >= currentVersion else {
+        guard envelope.version == currentVersion else {
             throw AetherDocumentError.unsupportedVersion(found: envelope.version)
         }
         guard let payload = try? decoder.decode(Payload.self, from: data) else {

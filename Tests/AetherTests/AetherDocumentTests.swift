@@ -124,8 +124,7 @@ struct AetherDocumentTests {
             brushRadius: 0.08, brushSoftness: 0.5)
 
         #expect(reopened.layers == savedLayers)
-        // Le rendu cube (encore visible jusqu'à l'étape 8) est reconstruit depuis
-        // les traits des calques : tous les traits y reparaissent.
+        // Tous les traits des calques rechargés reparaissent dans le modèle.
         #expect(reopened.strokes == savedLayers.flatMap(\.strokes))
     }
 
@@ -134,6 +133,15 @@ struct AetherDocumentTests {
     @Test func rejectsLegacyVersionOneDocument() throws {
         let data = Data(#"{"version":1,"viewYaw":0,"cubes":[]}"#.utf8)
         #expect(throws: AetherDocumentError.unsupportedVersion(found: 1)) {
+            _ = try AetherDocument.decode(from: data)
+        }
+    }
+
+    /// Un fichier d'un schéma postérieur (futur v3) est lui aussi refusé en
+    /// `unsupportedVersion` — pas signalé à tort comme corrompu.
+    @Test func rejectsFutureVersionDocument() throws {
+        let data = Data(#"{"version":3}"#.utf8)
+        #expect(throws: AetherDocumentError.unsupportedVersion(found: 3)) {
             _ = try AetherDocument.decode(from: data)
         }
     }

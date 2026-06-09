@@ -66,7 +66,9 @@ kernel void stamp_coverage_map(texture2d_array<float, access::read> src [[textur
     float ce = cos(el);
     float3 dir = float3(sin(az) * ce, sin(el), -cos(az) * ce);
 
-    // Carry the existing coverage forward (ping-pong keeps both slices in sync).
+    // Carry the existing coverage forward. Only the target slice is written
+    // here; the CPU blits the other slices across before this dispatch so the
+    // ping-pong swap doesn't lose them.
     float existing = src.read(gid, layer).r;
 
     // Project into the paint-time camera (eye at the origin). `forward` is the
