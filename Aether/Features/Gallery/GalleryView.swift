@@ -9,7 +9,24 @@ struct GalleryView: View {
     var onSelect: (SceneContext, RestoredCanvasState?) -> Void
 
     @State private var showImporter = false
-    @State private var showOpenError = false
+    /// Échec d'ouverture présenté à l'utilisateur (`nil` = pas d'alerte). Distingue
+    /// le fichier illisible du fichier d'une version antérieure d'Aether.
+    @State private var openError: OpenError?
+
+    /// Cas d'échec d'ouverture, chacun avec son message localisé sobre.
+    private enum OpenError: Int, Identifiable {
+        case unreadable
+        case unsupportedVersion
+
+        var id: Int { rawValue }
+
+        var messageKey: String.LocalizationValue {
+            switch self {
+            case .unreadable: "gallery.openError"
+            case .unsupportedVersion: "gallery.openErrorVersion"
+            }
+        }
+    }
 
     private let columns = [GridItem(.adaptive(minimum: 150), spacing: 16)]
 
@@ -48,13 +65,12 @@ struct GalleryView: View {
                 if case .success(let url) = result {
                     open(url)
                 } else {
-                    showOpenError = true
+                    openError = .unreadable
                 }
             }
-            .alert(
-                String(localized: "gallery.openError", table: "Aether"),
-                isPresented: $showOpenError
-            ) {}
+            .alert(item: $openError) { error in
+                Alert(title: Text(String(localized: error.messageKey, table: "Aether")))
+            }
         }
     }
 
@@ -63,14 +79,19 @@ struct GalleryView: View {
     private func open(_ url: URL) {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        guard let data = try? Data(contentsOf: url),
-              let payload = try? JSONDecoder().decode(AetherDocument.Payload.self, from: data),
-              let loaded = AetherDocument(payload: payload).makeLoaded()
-        else {
-            showOpenError = true
-            return
+        do {
+            let data = try Data(contentsOf: url)
+            let document = try AetherDocument.decode(from: data)
+            guard let loaded = document.makeLoaded() else {
+                openError = .unreadable
+                return
+            }
+            onSelect(loaded.context, loaded.restored)
+        } catch AetherDocumentError.unsupportedVersion {
+            openError = .unsupportedVersion
+        } catch {
+            openError = .unreadable
         }
-        onSelect(loaded.context, loaded.restored)
     }
 }
 

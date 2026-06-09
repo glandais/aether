@@ -62,10 +62,10 @@ enum ScreenshotHarness {
             tanHalfFov: Float(tan(context.scene.fieldOfView / 2)),
             aspect: 1320.0 / 2868.0)
 
-        let cubes = makeCubes(style: cloudStr, camera: camera)
+        let layers = makeLayers(style: cloudStr, camera: camera)
 
         let restored = RestoredCanvasState(
-            cubes: cubes, viewYaw: 0, viewPitch: 0,
+            layers: layers, viewYaw: 0, viewPitch: 0,
             brushRadius: 0.09, brushSoftness: 0.6,
             hourOverride: hourOverride, dateOverride: nil,
             coordinateOverride: nil, timeZoneIdentifier: nil, fovOverride: nil)
@@ -75,7 +75,7 @@ enum ScreenshotHarness {
 
     // MARK: - Construction de nuages pré-peints
 
-    private static func makeCubes(style: String, camera: StrokeCamera) -> [CloudCube] {
+    private static func makeLayers(style: String, camera: StrokeCamera) -> [CloudLayer] {
         let strokes: [BrushStroke]
         switch style {
         case "none":
@@ -90,7 +90,7 @@ enum ScreenshotHarness {
         default:  // cumulus
             strokes = cumulus(centerX: 0.50, centerY: 0.40, scale: 1.0, camera: camera)
         }
-        return [CloudCube(anchorForward: camera.forward, strokes: strokes)]
+        return [CloudLayer(genus: .cumulus, strokes: strokes)]
     }
 
     /// Un cumulus en tas : rangées horizontales superposées, plus larges en bas,

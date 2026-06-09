@@ -28,9 +28,33 @@ lieu et l'instant. On ne stocke donc que les entrées, jamais le dérivé.
 | `Scene` | `id, title, landscapeAssetName, coordinate, date, heading, fieldOfView, pitch, roll, utcOffset, timeZoneIdentifier` |
 | Contexte de rendu | `displayAspect, skyExposure, cloudParameters, sea` |
 | Paysage | l'image de fond, **embarquée en PNG** |
-| Canvas (`CanvasModel`) | `cubes` (chaque `CloudCube` → `BrushStroke[]` → points + `StrokeCamera`), `viewYaw, viewPitch, brushRadius, brushSoftness` |
+| Canvas (`CanvasModel`) | `layers` (chaque `CloudLayer` → `genus`, `BrushStroke[]` → points + `StrokeCamera`, `coverageBias`, `opacity`, `isVisible`), `viewYaw, viewPitch, brushRadius, brushSoftness` |
 | Surcharges (`CanvasView`) | `hourOverride, dateOverride, coordinateOverride, timeZoneIdentifier (du fuseau choisi), fovOverride` |
-| Format | `version` (migration future) |
+| Format | `version` (politique de version ci-dessous) |
+
+### Schéma v2 — calques (multi-coquilles)
+
+Le modèle multi-coquilles (cf. [`SHELLS.md`](SHELLS.md)) remplace les `cubes` par
+des **calques** : `version` passe à **2**. Chaque `CloudLayer` persisté porte son
+genre (`cumulus`/`altocumulus`/`cirrus`), ses traits et ses **surcharges météo
+par calque** (`coverageBias`, `opacity`, `isVisible`). À la réouverture, les
+traits sont **re-cuits dans l'atlas de couverture** par le même chemin que la
+peinture live (`CoverageBaker`) — enregistrer puis rouvrir rend à l'identique. Les
+surcharges sauvegardées priment sur les défauts météo de la scène : un calque
+rechargé n'hérite **pas** des défauts courants (il garde son opacité/visibilité).
+
+### Politique de version
+
+- **Pas de rétrocompatibilité** (décision actée, `SHELLS.md` §10/§11) : l'app
+  n'étant pas publiée, le schéma a fait un **bump franc 1 → 2** sans migration.
+- Un fichier `version < 2` (cubes) est **refusé proprement** : `decode(from:)`
+  lit d'abord la seule `version` puis lève `AetherDocumentError.unsupportedVersion`
+  — pas de crash, pas de document à moitié chargé. La galerie affiche un message
+  sobre localisé (`gallery.openErrorVersion`, fr + en) ; un contenu illisible
+  (JSON corrompu, version absente) donne `AetherDocumentError.corrupted` et le
+  message générique (`gallery.openError`).
+- `AetherDocument.currentVersion` est la **source unique** de la version courante ;
+  le `Payload.version` la prend par défaut à l'écriture.
 
 Notes :
 
@@ -64,9 +88,9 @@ Notes :
   `UTExportedTypeDeclarations`) ; les clés générées (`GENERATE_INFOPLIST_FILE`)
   y sont **fusionnées** au build via `INFOPLIST_FILE` dans `project.yml`.
 - **`CGImage+PNG.swift`** — encodage/décodage PNG via ImageIO.
-- **`Codable`** ajouté aux types Domain purs (`GeoCoordinate`, `Scene`,
-  `CloudParameters`, `SeaSurface`, `BrushStroke`/`StrokeCamera`, `CloudCube`).
-  Les `SIMD2/SIMD3<Float>` sont déjà `Codable` (conteneur scalaire).
+- **`Codable`** sur les types Domain purs (`GeoCoordinate`, `Scene`,
+  `CloudParameters`, `SeaSurface`, `BrushStroke`/`StrokeCamera`, `CloudLayer`/
+  `CloudGenus`). Les `SIMD2/SIMD3<Float>` sont déjà `Codable` (conteneur scalaire).
 
 ### Flux
 
@@ -74,22 +98,30 @@ Notes :
   `AetherDocument` depuis `context` + `model` + les surcharges, puis ouvre
   `.fileExporter` (nom par défaut = titre de la scène).
 - **Ouvrir** (galerie, bouton de barre d'outils) : `.fileImporter` →
-  lecture de l'URL (ressource protégée par le bac à sable) → décodage du
-  `Payload` → `makeLoaded()` → `onSelect(context, restored)`.
+  lecture de l'URL (ressource protégée par le bac à sable) →
+  `AetherDocument.decode(from:)` (contrôle de version) → `makeLoaded()` →
+  `onSelect(context, restored)`. Une erreur typée (`unsupportedVersion`/
+  `corrupted`) bascule sur l'alerte localisée correspondante.
 - **`RootView`** porte le `SceneContext` **et** le `RestoredCanvasState`
   optionnel, transmis à `CanvasView(context:restored:)`. Le `.id(context.id)`
   garantit une **nouvelle identité** par scène ouverte (état `@State` réamorcé
   proprement). `CanvasView.init` ensemence les `@State` (modèle + surcharges)
   dès la première frame — pas d'image transitoire.
-- **`CanvasModel.load(…)`** remplace les cubes et l'orientation et réinitialise
-  l'historique (pas d'annulation à travers un chargement).
+- **`CanvasModel.load(layers:…)`** remplace les calques et l'orientation et
+  réinitialise l'historique (pas d'annulation à travers un chargement). Les
+  surcharges par calque sont posées telles quelles ; le rendu cube encore visible
+  (jusqu'au nettoyage de l'étape 8 du plan multi-coquilles) est reconstruit depuis
+  les traits des calques, chaque `BrushStroke` portant sa `StrokeCamera`.
 
 ## Vérification
 
 - **Test unitaire** `AetherDocumentTests` (`Tests/AetherTests`) : capture → JSON
-  → décodage → reconstruction ; assertions sur l'égalité des cubes (points +
-  caméra par trait), des surcharges, de la scène, des paramètres de rendu et des
-  dimensions de l'image embarquée.
+  → décodage → reconstruction ; assertions sur l'égalité des **calques** (genre,
+  traits, surcharges météo, visibilité), des surcharges d'instant/lieu, de la
+  scène, des paramètres de rendu et des dimensions de l'image embarquée. Un test
+  vérifie aussi le **refus** d'un fichier `version: 1` avec
+  `unsupportedVersion(found: 1)`, et un autre que `load(layers:)` n'écrase pas les
+  surcharges par calque avec les défauts météo d'une scène différente.
 - **Vérification visuelle** sur simulateur : peindre, régler l'heure / le zoom,
   **Enregistrer** vers `Files` ; relancer, **Ouvrir un ciel** depuis la galerie,
   comparer la capture à celle d'avant sauvegarde.

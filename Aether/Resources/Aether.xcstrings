@@ -377,6 +377,23 @@
         }
       }
     },
+    "gallery.openErrorVersion" : {
+      "comment" : "Alerte : le fichier .aether provient d'une version antérieure d'Aether (schéma v1) et ne peut être rouvert.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This sky was made with an earlier version of Aether and can no longer be opened."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce ciel provient d'une version antérieure d'Aether et ne peut être rouvert."
+          }
+        }
+      }
+    },
     "group.brush" : {
       "comment" : "Accessibilité : bascule du sous-menu réglages du pinceau.",
       "extractionState" : "stale",

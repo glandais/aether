@@ -210,22 +210,22 @@ final class CanvasModel {
         isDrawing = false
     }
 
-    /// Réamorce l'état depuis un fichier `.aether` rechargé : remplace les cubes
-    /// et l'orientation, réinitialise l'historique (pas d'annulation à travers un
-    /// chargement). Le tangage est reclampé par sécurité.
+    /// Réamorce l'état depuis un fichier `.aether` v2 rechargé : remplace les
+    /// **calques** et l'orientation, réinitialise l'historique (pas d'annulation à
+    /// travers un chargement). Le tangage est reclampé par sécurité.
+    ///
+    /// Les calques sont posés **tels quels** : leurs surcharges météo
+    /// (`coverageBias`/`opacity`/`isVisible`) sauvegardées priment sur les défauts
+    /// de scène — un calque rechargé n'hérite pas des défauts météo courants.
+    /// Les cubes (rendu visible jusqu'à l'étape 8) sont reconstruits depuis les
+    /// traits des calques, chaque trait portant déjà sa `StrokeCamera` : la
+    /// peinture se reprojette à l'identique.
     func load(
-        cubes: [CloudCube], viewYaw: Float, viewPitch: Float,
+        layers: [CloudLayer], viewYaw: Float, viewPitch: Float,
         brushRadius: Float, brushSoftness: Float
     ) {
-        self.cubes = cubes
-        // Reconstruit les calques depuis les traits rechargés : tant que la
-        // persistance multi-coquilles (étape 7) n'existe pas, les `.aether` ne
-        // portent que des cubes. Tous les traits vont dans le calque actif courant.
-        self.layers = cubes.isEmpty
-            ? []
-            : [CloudLayer(
-                genus: activeGenus, strokes: cubes.flatMap(\.strokes),
-                coverageBias: defaultCoverageBias, opacity: defaultOpacity)]
+        self.layers = layers
+        self.cubes = Self.rebuildCubes(from: layers.flatMap(\.strokes))
         self.viewYaw = viewYaw
         self.viewPitch = min(max(viewPitch, -Self.maxPitch), Self.maxPitch)
         self.brushRadius = brushRadius
@@ -233,6 +233,26 @@ final class CanvasModel {
         isDrawing = false
         undoStack.removeAll()
         redoStack.removeAll()
+    }
+
+    /// Regroupe une liste plate de traits en cubes, en suivant la même règle que
+    /// `beginStroke` : un nouveau cube naît dès que la pose de regard d'un trait
+    /// s'écarte de celle du cube courant (au-delà de `sameViewCos`), plafonnée à
+    /// `CloudCube.maxCount`. Conserve la parité du rendu cube à la réouverture.
+    private static func rebuildCubes(from strokes: [BrushStroke]) -> [CloudCube] {
+        var cubes: [CloudCube] = []
+        for stroke in strokes {
+            let forward = stroke.camera.forward
+            let sameView = cubes.last.map {
+                dot($0.anchorForward, forward) > sameViewCos
+            } ?? false
+            if !sameView && cubes.count < CloudCube.maxCount {
+                cubes.append(CloudCube(anchorForward: forward, strokes: [stroke]))
+            } else {
+                cubes[cubes.count - 1].strokes.append(stroke)
+            }
+        }
+        return cubes
     }
 
     /// Oriente le regard. Le lacet est libre (panoramique) ; le tangage est

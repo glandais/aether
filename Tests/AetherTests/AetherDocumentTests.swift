@@ -30,17 +30,26 @@ struct AetherDocumentTests {
     }
 
     @Test func roundTripReproducesState() throws {
-        // État de canvas peint (deux traits → un cube).
+        // État de canvas peint sur deux calques (cumulus + cirrus), avec des
+        // surcharges météo distinctes par calque — pour vérifier qu'elles
+        // survivent à l'aller-retour (et ne sont pas écrasées par les défauts).
         let model = CanvasModel()
         model.brushRadius = 0.1
         model.brushSoftness = 0.4
         let camera = StrokeCamera(
             right: SIMD3(1, 0, 0), up: SIMD3(0, 1, 0), forward: SIMD3(0, 0, 1),
             tanHalfFov: 0.5, aspect: 1.5)
+        model.selectGenus(.cumulus)
         model.beginStroke(at: SIMD2(0.5, 0.5), camera: camera)
         model.extendStroke(to: SIMD2(0.62, 0.5))
         model.endStroke()
+        model.selectGenus(.cirrus)
+        model.beginStroke(at: SIMD2(0.3, 0.4), camera: camera)
+        model.endStroke()
+        model.setOpacity(0.7, for: .cirrus)
+        model.setVisible(false, for: .cirrus)
         model.setRotation(yaw: 0.3, pitch: -0.2)
+        #expect(model.layers.count == 2)
 
         let scene = Scene(
             title: "Test", coordinate: GeoCoordinate(latitude: 48.85, longitude: 2.35),
@@ -58,11 +67,12 @@ struct AetherDocumentTests {
             coordinateOverride: GeoCoordinate(latitude: 10, longitude: 20),
             timeZoneOverride: TimeZone(identifier: "Asia/Tokyo"), fovOverride: 0.8))
         let data = try JSONEncoder().encode(document.payload)
-        let payload = try JSONDecoder().decode(AetherDocument.Payload.self, from: data)
-        let loaded = try #require(AetherDocument(payload: payload).makeLoaded())
+        let reloaded = try AetherDocument.decode(from: data)
+        let loaded = try #require(reloaded.makeLoaded())
 
-        // Traits identiques (points + pose de caméra par trait).
-        #expect(loaded.restored.cubes == model.cubes)
+        // Calques identiques (genre, traits, surcharges météo, visibilité) : les
+        // surcharges par calque (opacité du cirrus, visibilité) sont préservées.
+        #expect(loaded.restored.layers == model.layers)
         #expect(loaded.restored.viewYaw == 0.3)
         #expect(loaded.restored.viewPitch == -0.2)
         #expect(loaded.restored.brushRadius == 0.1)
@@ -85,5 +95,55 @@ struct AetherDocumentTests {
         // Paysage embarqué : mêmes dimensions après aller-retour PNG.
         #expect(loaded.context.landscape.width == 64)
         #expect(loaded.context.landscape.height == 40)
+    }
+
+    /// Recharger les calques dans un modèle neuf reproduit les calques à
+    /// l'identique (mêmes traits cuits dans l'atlas de couverture, mêmes
+    /// surcharges) : la réouverture rend à l'identique de l'enregistrement.
+    @Test func loadRestoresLayersIdentically() throws {
+        let model = CanvasModel()
+        let camera = StrokeCamera(
+            right: SIMD3(1, 0, 0), up: SIMD3(0, 1, 0), forward: SIMD3(0, 0, 1),
+            tanHalfFov: 0.5, aspect: 1.5)
+        model.selectGenus(.cumulus)
+        model.beginStroke(at: SIMD2(0.4, 0.5), camera: camera)
+        model.extendStroke(to: SIMD2(0.55, 0.52))
+        model.endStroke()
+        model.selectGenus(.altocumulus)
+        model.beginStroke(at: SIMD2(0.6, 0.35), camera: camera)
+        model.endStroke()
+        model.setOpacity(0.5, for: .altocumulus)
+        let savedLayers = model.layers
+
+        // Modèle neuf avec des défauts météo DIFFÉRENTS : ils ne doivent pas
+        // surcharger les calques rechargés.
+        let reopened = CanvasModel()
+        reopened.applySceneDefaults(CloudParameters(coverageBias: 0.2, densityScale: 0.4))
+        reopened.load(
+            layers: savedLayers, viewYaw: 0.1, viewPitch: 0.0,
+            brushRadius: 0.08, brushSoftness: 0.5)
+
+        #expect(reopened.layers == savedLayers)
+        // Le rendu cube (encore visible jusqu'à l'étape 8) est reconstruit depuis
+        // les traits des calques : tous les traits y reparaissent.
+        #expect(reopened.strokes == savedLayers.flatMap(\.strokes))
+    }
+
+    /// Un fichier d'un schéma antérieur (v1, cubes) est refusé proprement avec
+    /// l'erreur typée — pas de crash, pas de document à moitié chargé.
+    @Test func rejectsLegacyVersionOneDocument() throws {
+        let data = Data(#"{"version":1,"viewYaw":0,"cubes":[]}"#.utf8)
+        #expect(throws: AetherDocumentError.unsupportedVersion(found: 1)) {
+            _ = try AetherDocument.decode(from: data)
+        }
+    }
+
+    /// Un contenu non décodable (ni version lisible) est signalé `corrupted`,
+    /// distinct de l'erreur de version.
+    @Test func rejectsCorruptedContent() throws {
+        let garbage = Data("not json".utf8)
+        #expect(throws: AetherDocumentError.corrupted) {
+            _ = try AetherDocument.decode(from: garbage)
+        }
     }
 }

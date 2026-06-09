@@ -9,10 +9,21 @@ extension UTType {
     static let aetherScene = UTType(exportedAs: "io.github.glandais.aether.scene")
 }
 
+/// Erreurs typées de lecture d'un fichier `.aether`.
+enum AetherDocumentError: Error, Equatable {
+    /// Le fichier provient d'un schéma antérieur, incompatible (pas de
+    /// rétrocompatibilité, cf. `docs/SHELLS.md` §10). Porte la version trouvée.
+    case unsupportedVersion(found: Int)
+    /// Le contenu est illisible (JSON corrompu, paysage embarqué invalide…).
+    case corrupted
+}
+
 /// État du canvas restauré depuis un fichier `.aether`, prêt à réamorcer une
-/// `CanvasView` (traits, regard, pinceau et surcharges d'instant/lieu/FOV).
+/// `CanvasView` (calques, regard, pinceau et surcharges d'instant/lieu/FOV).
 struct RestoredCanvasState {
-    var cubes: [CloudCube]
+    /// Calques du modèle multi-coquilles (schéma v2). Chaque calque porte son
+    /// genre, ses traits et ses surcharges météo (couverture/opacité/visibilité).
+    var layers: [CloudLayer]
     var viewYaw: Float
     var viewPitch: Float
     var brushRadius: Float
@@ -45,9 +56,15 @@ struct AetherDocument: FileDocument {
     static let readableContentTypes: [UTType] = [.aetherScene]
     static let writableContentTypes: [UTType] = [.aetherScene]
 
-    /// Contenu sérialisé (JSON). `version` ouvre une migration ultérieure.
+    /// Version de schéma courante du contenu `.aether`. v2 : le canvas encode des
+    /// **calques** (`CloudLayer`) — modèle multi-coquilles, cf. `docs/SHELLS.md`.
+    /// Bump franc depuis v1 (cubes), sans rétrocompatibilité (§10).
+    static let currentVersion = 2
+
+    /// Contenu sérialisé (JSON). `version` porte la compatibilité de schéma : un
+    /// fichier `version < currentVersion` est refusé proprement à la lecture.
     struct Payload: Codable {
-        var version: Int = 1
+        var version: Int = AetherDocument.currentVersion
         var scene: Scene
         /// Aspect d'affichage (lettrage) ; `nil` = plein cadre.
         var displayAspect: Double?
@@ -56,7 +73,8 @@ struct AetherDocument: FileDocument {
         var sea: SeaSurface
         /// Paysage de fond embarqué (PNG).
         var landscapePNG: Data
-        var cubes: [CloudCube]
+        /// Calques peints (schéma v2) : genre, traits, couverture/opacité/visibilité.
+        var layers: [CloudLayer]
         var viewYaw: Float
         var viewPitch: Float
         var brushRadius: Float
@@ -93,7 +111,7 @@ struct AetherDocument: FileDocument {
             cloudParameters: context.cloudParameters,
             sea: context.sea,
             landscapePNG: png,
-            cubes: model.cubes,
+            layers: model.layers,
             viewYaw: model.viewYaw,
             viewPitch: model.viewPitch,
             brushRadius: model.brushRadius,
@@ -107,9 +125,32 @@ struct AetherDocument: FileDocument {
 
     init(configuration: ReadConfiguration) throws {
         guard let data = configuration.file.regularFileContents else {
-            throw CocoaError(.fileReadCorruptFile)
+            throw AetherDocumentError.corrupted
         }
-        payload = try JSONDecoder().decode(Payload.self, from: data)
+        self = try Self.decode(from: data)
+    }
+
+    /// Décode un contenu `.aether` en refusant proprement un schéma antérieur.
+    /// On lit d'abord la seule `version` (tolérant aux champs absents/renommés
+    /// entre versions) : un fichier v1 (cubes) ne se décode pas en `Payload` v2 et
+    /// doit échouer en `unsupportedVersion`, pas en `corrupted`.
+    static func decode(from data: Data) throws -> AetherDocument {
+        let decoder = JSONDecoder()
+        guard let envelope = try? decoder.decode(VersionEnvelope.self, from: data) else {
+            throw AetherDocumentError.corrupted
+        }
+        guard envelope.version >= currentVersion else {
+            throw AetherDocumentError.unsupportedVersion(found: envelope.version)
+        }
+        guard let payload = try? decoder.decode(Payload.self, from: data) else {
+            throw AetherDocumentError.corrupted
+        }
+        return AetherDocument(payload: payload)
+    }
+
+    /// Vue minimale du JSON pour lire la version sans dépendre du reste du schéma.
+    private struct VersionEnvelope: Decodable {
+        var version: Int
     }
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
@@ -129,7 +170,7 @@ struct AetherDocument: FileDocument {
             cloudParameters: payload.cloudParameters,
             sea: payload.sea)
         let restored = RestoredCanvasState(
-            cubes: payload.cubes,
+            layers: payload.layers,
             viewYaw: payload.viewYaw,
             viewPitch: payload.viewPitch,
             brushRadius: payload.brushRadius,

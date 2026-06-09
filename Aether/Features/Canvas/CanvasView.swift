@@ -89,11 +89,12 @@ struct CanvasView: View {
         self.chromeHidden = chromeHidden
         let model = CanvasModel()
         // Défauts par calque issus de la météo statique du paysage (étape 6) :
-        // posés avant le `load`, pour que les calques reconstruits en héritent.
+        // posés avant tout trait neuf. Les calques rechargés (`load`) portent leurs
+        // propres surcharges sauvegardées et n'en héritent pas.
         model.applySceneDefaults(context.cloudParameters)
         if let restored {
             model.load(
-                cubes: restored.cubes, viewYaw: restored.viewYaw, viewPitch: restored.viewPitch,
+                layers: restored.layers, viewYaw: restored.viewYaw, viewPitch: restored.viewPitch,
                 brushRadius: restored.brushRadius, brushSoftness: restored.brushSoftness)
         }
         _model = State(initialValue: model)
