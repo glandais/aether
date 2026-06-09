@@ -413,6 +413,23 @@
         }
       }
     },
+    "group.layers" : {
+      "comment" : "Accessibilité : bascule du panneau « Calques » (étages de nuages).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Layers"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Calques"
+          }
+        }
+      }
+    },
     "group.more" : {
       "comment" : "Accessibilité : bascule du panneau « More » (réglages ciel + lieu).",
       "extractionState" : "stale",
@@ -445,6 +462,125 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ciel"
+          }
+        }
+      }
+    },
+    "layer.altocumulus" : {
+      "comment" : "Nom du calque/genre altocumulus (étage moyen, floconneux).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Altocumulus"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Altocumulus"
+          }
+        }
+      }
+    },
+    "layer.cirrus" : {
+      "comment" : "Nom du calque/genre cirrus (étage haut, fibreux).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cirrus"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cirrus"
+          }
+        }
+      }
+    },
+    "layer.cumulus" : {
+      "comment" : "Nom du calque/genre cumulus (étage bas, bourgeonnant).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cumulus"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cumulus"
+          }
+        }
+      }
+    },
+    "layer.hidden" : {
+      "comment" : "Accessibilité : valeur du calque masqué (étage éteint).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hidden"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Masqué"
+          }
+        }
+      }
+    },
+    "layer.opacity" : {
+      "comment" : "Accessibilité : curseur d'opacité du calque sélectionné.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opacity"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opacité"
+          }
+        }
+      }
+    },
+    "layer.visibility" : {
+      "comment" : "Accessibilité : bascule de visibilité du calque (étage allumé/éteint).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visibility"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visibilité"
+          }
+        }
+      }
+    },
+    "layer.visible" : {
+      "comment" : "Accessibilité : valeur du calque visible (étage allumé).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visible"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visible"
           }
         }
       }

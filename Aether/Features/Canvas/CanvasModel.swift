@@ -127,6 +127,43 @@ final class CanvasModel {
         isDrawing = false
     }
 
+    /// Sélectionne le calque actif (étage de peinture). Pure sélection d'outil —
+    /// pas une action réversible, donc hors historique.
+    func selectGenus(_ genus: CloudGenus) {
+        activeGenus = genus
+    }
+
+    /// Le calque existant pour ce genre, s'il en porte un (un trait a déjà été
+    /// déposé à cet étage). `nil` tant que l'étage est vierge.
+    func layer(for genus: CloudGenus) -> CloudLayer? {
+        layers.first { $0.genus == genus }
+    }
+
+    /// Bascule la visibilité d'un calque (étage éteint/allumé à l'écran).
+    /// Instantané réversible : le toggle s'annule comme un trait.
+    func setVisible(_ visible: Bool, for genus: CloudGenus) {
+        guard let li = layers.firstIndex(where: { $0.genus == genus }),
+              layers[li].isVisible != visible else { return }
+        recordHistory()
+        layers[li].isVisible = visible
+    }
+
+    /// Instantané d'avant-réglage d'opacité, à appeler **une fois** au début d'un
+    /// glissement (l'annulation revient alors à l'opacité d'avant-geste, pas à
+    /// chaque pas intermédiaire). Sans effet si le calque n'existe pas.
+    func snapshotForOpacity(of genus: CloudGenus) {
+        guard layers.contains(where: { $0.genus == genus }) else { return }
+        recordHistory()
+    }
+
+    /// Règle l'opacité d'un calque (extinction de la coquille). Écriture continue
+    /// pendant le glissement ; l'historique est instantané à part
+    /// (`snapshotForOpacity`), pour ne pas empiler une action par frame.
+    func setOpacity(_ opacity: Float, for genus: CloudGenus) {
+        guard let li = layers.firstIndex(where: { $0.genus == genus }) else { return }
+        layers[li].opacity = opacity
+    }
+
     func clear() {
         guard !cubes.isEmpty else { return }
         recordHistory()
