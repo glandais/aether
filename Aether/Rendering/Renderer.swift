@@ -3,10 +3,45 @@ import MetalKit
 import os
 import simd
 
+/// Une coquille concentrique prête pour le GPU (modèle multi-coquilles, étape 4).
+/// Disposition mémoire **identique** à `Shell` dans `Cloud.metal` (deux float4 +
+/// quatre `uint`, le tout aligné sur 16 octets).
+private struct ShellGPU {
+    var radii: SIMD4<Float>   // x: inner ; y: outer ; z: cloudType ; w: noiseScale
+    var drift: SIMD4<Float>   // xy: dérive bruit ; z: coverageBias ; w: opacity
+    var layerSlice: UInt32    // tranche de la coquille dans l'atlas de couverture
+    var visible: UInt32       // 1 si le calque est visible, 0 pour l'ignorer
+    var pad0: UInt32 = 0      // bourrage : garde la struct alignée sur 16 octets
+    var pad1: UInt32 = 0
+
+    /// Coquille vide (ignorée à la marche) : rembourrage de l'atlas de coquilles.
+    static let empty = ShellGPU(radii: .zero, drift: .zero, layerSlice: 0, visible: 0)
+}
+
+/// Tableau de taille fixe de `CloudLayer.maxCount` (= 4) coquilles GPU, à
+/// disposition mémoire contiguë (équivalent de `Shell shells[kMaxShells]` dans
+/// `Cloud.metal`). Un `struct` plutôt qu'un tuple à 4 membres (lisibilité + règle
+/// SwiftLint `large_tuple`).
+private struct ShellQuad {
+    var shell0 = ShellGPU.empty
+    var shell1 = ShellGPU.empty
+    var shell2 = ShellGPU.empty
+    var shell3 = ShellGPU.empty
+
+    /// Construit le quad depuis les coquilles triées (au plus 4 ; le reste reste
+    /// vide). Les coquilles au-delà de `layerCount` ne sont jamais lues côté GPU.
+    init(_ shells: [ShellGPU]) {
+        if shells.indices.contains(0) { shell0 = shells[0] }
+        if shells.indices.contains(1) { shell1 = shells[1] }
+        if shells.indices.contains(2) { shell2 = shells[2] }
+        if shells.indices.contains(3) { shell3 = shells[3] }
+    }
+}
+
 /// Uniforms du shader de nuage. La disposition mémoire doit correspondre à
-/// `CloudUniforms` dans `Cloud.metal`. Modèle multi-coquilles (étape 3, une seule
-/// coquille) : la forme vient de la couverture directionnelle peinte (atlas 2D
-/// array) et de la géométrie de coquille, plus de cubes.
+/// `CloudUniforms` dans `Cloud.metal`. Modèle multi-coquilles (étape 4) : la forme
+/// vient de la couverture directionnelle peinte (atlas 2D array) et de
+/// l'empilement de coquilles concentriques, plus de cubes.
 private struct CloudUniforms {
     var resolution: SIMD2<Float>
     var time: Float
@@ -20,12 +55,11 @@ private struct CloudUniforms {
     var camRight: SIMD4<Float>
     var camUp: SIMD4<Float>
     var camForward: SIMD4<Float>
-    // Coquille marchée (étape 3). Rayons planète, profil vertical, échelle de
-    // bruit (coords planète) et dérive ; biais de couverture + opacité du calque.
-    var shellRadii: SIMD4<Float>  // x: inner ; y: outer ; z: cloudType ; w: noiseScale
-    var shellDrift: SIMD4<Float>  // xy: dérive bruit ; z: coverageBias ; w: opacity
-    var layerSlice: UInt32        // tranche de la coquille dans l'atlas de couverture
-    var hasShell: UInt32          // 1 si une coquille est peinte cette frame
+    // Coquilles concentriques à marcher, triées par rayon `inner` croissant (la
+    // plus basse en premier → front-to-back). `layerCount` borne la boucle.
+    // Tableau de taille fixe `CloudLayer.maxCount` (= `kMaxShells` côté shader).
+    var shells: ShellQuad
+    var layerCount: UInt32
 }
 
 /// Un cube de nuage prêt pour le GPU : centre + demi-taille monde. Disposition
@@ -605,13 +639,12 @@ final class Renderer: NSObject, MTKViewDelegate {
         lastCameraForward = cameraForward
         lastCameraTanHalfFov = cameraTanHalfFov
 
-        // Coquille marchée (étape 3) : la première coquille `cumulus` peinte. Sa
-        // tranche dans l'atlas de couverture = son index dans `pendingLayers`
-        // (ordre de cuisson du baker). Absente → ciel vide (`hasShell = 0`).
-        let cappedLayers = Array(pendingLayers.prefix(CloudLayer.maxCount))
-        let shellIndex = cappedLayers.firstIndex { $0.genus == .cumulus }
-        let shellLayer = shellIndex.map { cappedLayers[$0] }
-        let shellSpec = shellLayer?.genus.shell
+        // Coquilles marchées (étape 4) : toutes les couches peintes (≤ maxCount),
+        // **triées par altitude de coquille croissante** (inner) — la plus basse
+        // d'abord, pour la marche front-to-back sans tri côté GPU. La tranche de
+        // couverture de chaque coquille reste son index **original** dans
+        // `pendingLayers` (ordre de cuisson du baker), distinct de l'index trié.
+        let shells = Renderer.makeShells(from: pendingLayers)
 
         var uniforms = CloudUniforms(
             resolution: SIMD2(Float(halfWidth), Float(halfHeight)),
@@ -626,14 +659,8 @@ final class Renderer: NSObject, MTKViewDelegate {
             camRight: SIMD4(cameraRight.x, cameraRight.y, cameraRight.z, 0.0),
             camUp: SIMD4(cameraUp.x, cameraUp.y, cameraUp.z, 0.0),
             camForward: SIMD4(cameraForward.x, cameraForward.y, cameraForward.z, 0.0),
-            shellRadii: SIMD4(
-                shellSpec?.inner ?? 0, shellSpec?.outer ?? 0,
-                shellSpec?.cloudType ?? 0, shellSpec?.noiseScale ?? 0),
-            shellDrift: SIMD4(
-                shellSpec?.drift.x ?? 0, shellSpec?.drift.y ?? 0,
-                shellLayer?.coverageBias ?? 0, shellLayer?.opacity ?? 1),
-            layerSlice: UInt32(shellIndex ?? 0),
-            hasShell: shellIndex != nil ? 1 : 0
+            shells: shells.quad,
+            layerCount: UInt32(shells.count)
         )
         var temporal = CloudTemporal(
             activeIndex: Renderer.activeOrder[frameIndex % 4],
@@ -779,6 +806,30 @@ final class Renderer: NSObject, MTKViewDelegate {
     }
 
     // MARK: - Peinture du volume
+
+    /// Construit les coquilles GPU depuis les calques courants (modèle
+    /// multi-coquilles, étape 4). Plafonne à `CloudLayer.maxCount`, conserve la
+    /// **tranche d'atlas** de chaque calque (= son index original dans
+    /// `pendingLayers`, ordre de cuisson du baker) puis trie par rayon `inner`
+    /// croissant — la plus basse en premier, pour la marche front-to-back. Le tri
+    /// dissocie l'ordre de marche de l'index de tranche. Renvoie le tableau trié
+    /// et son rembourrage à 4 éléments (tuple attendu par `CloudUniforms`).
+    private static func makeShells(from layers: [CloudLayer]) -> (count: Int, quad: ShellQuad) {
+        let capped = layers.prefix(CloudLayer.maxCount)
+        let shells = capped.enumerated().map { slice, layer -> ShellGPU in
+            let spec = layer.genus.shell
+            return ShellGPU(
+                radii: SIMD4(spec.inner, spec.outer, spec.cloudType, spec.noiseScale),
+                drift: SIMD4(spec.drift.x, spec.drift.y, layer.coverageBias, layer.opacity),
+                layerSlice: UInt32(slice),
+                visible: layer.isVisible ? 1 : 0)
+        }
+        // Altitude croissante : inner de la coquille. Tri stable non nécessaire
+        // (les étages sont disjoints), mais l'ordre fixe garantit le front-to-back.
+        .sorted { $0.radii.x < $1.radii.x }
+
+        return (shells.count, ShellQuad(shells))
+    }
 
     /// Centre monde d'un cube depuis son ancre de regard : le long de l'ancre à
     /// `volumeDistance`, **soulevé** pour que la base du cube reste au-dessus de

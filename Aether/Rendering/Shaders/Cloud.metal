@@ -2,21 +2,47 @@
 using namespace metal;
 
 // Multi-shell model (docs/SHELLS.md §6). The cloud's shape no longer comes from a
-// finite painted AABB but from a concentric spherical SHELL wrapping a small
+// finite painted AABB but from CONCENTRIC spherical SHELLS wrapping a small
 // "planet" (the realtime_clouds reference). The camera sits on the surface; a
-// ray that climbs (rd.y > 0) crosses the shell between intersectSphere(inner) and
-// intersectSphere(outer). "Where there is cloud" is a painted directional
-// coverage map (azimuth × elevation) sampled ONCE per pixel — coverage is
-// constant along a view ray. The vertical relief comes for free from the shell
+// ray that climbs (rd.y > 0) crosses each shell between intersectSphere(inner)
+// and intersectSphere(outer). "Where there is cloud" is a painted directional
+// coverage map (azimuth × elevation) sampled ONCE per shell per pixel — coverage
+// is constant along a view ray. The vertical relief comes for free from the shell
 // geometry (height_fraction) and the 3D noise (sampled in p, which varies along
-// the ray). This step raymarches a SINGLE cumulus shell; step 4 stacks shells.
+// the ray).
+//
+// The shells are NESTED: an ascending ray crosses the lowest first, so marching
+// them in order of increasing altitude is front-to-back with NO sorting. The
+// transmittance and scattered radiance are SHARED across shells — a thin
+// translucent cirrus lets the cumulus below show through. A shell is skipped
+// (`continue`) where nothing is painted in the ray's direction or it is hidden,
+// and the whole loop breaks once transmittance saturates (lower shells already
+// opaque hide the higher ones).
 //
 // Lighting is unchanged from the cube path: multiple-scattering octaves, dual-lobe
 // Henyey-Greenstein phase, powder, scene sun colour / sky ambient (resolved on the
-// CPU). The light march is bounded to the current shell (self-shadowing only,
-// decision §11); it re-samples the coverage map per light step (§8 alternative) so
-// edges of a painted stroke aren't over-shadowed. Temporal 2×2 amortization and
-// the premultiplied composite are kept.
+// CPU). The light march is bounded to the current shell (self-shadowing only, no
+// cross-shell shadowing, decision §11); it re-samples the coverage map per light
+// step (§8 alternative) so edges of a painted stroke aren't over-shadowed.
+// Temporal 2×2 amortization and the premultiplied composite are kept.
+
+// One concentric shell (a painted layer). `inner`/`outer` are radii from the
+// planet centre; `cloudType` drives the height gradient; `noiseScale` is in
+// planet coordinates (~3e-4, NOT the cube `kNoiseScale`); `drift` advects the
+// noise only. `coverageBias`/`opacity` are the layer's own (ex-weather).
+// `layerSlice` is the shell's slice in the coverage atlas (its bake order, NOT
+// its altitude rank); `visible` toggles the layer off without removing it.
+struct Shell {
+    float4 radii;       // x: inner, y: outer, z: cloudType, w: noiseScale
+    float4 drift;       // xy: noise drift (planet coords / s), z: coverageBias, w: opacity
+    uint   layerSlice;  // array slice of this shell in the coverage atlas
+    uint   visible;     // 1 if the layer is shown, 0 to skip it
+    uint   pad0;        // keep the struct 16-byte aligned (matches Swift `ShellGPU`)
+    uint   pad1;
+};
+
+// Up to this many concentric shells (matches `CloudLayer.maxCount`).
+constant uint kMaxShells = 4u;
 
 struct CloudUniforms {
     float2 resolution;
@@ -33,14 +59,10 @@ struct CloudUniforms {
     float4 camRight;
     float4 camUp;
     float4 camForward;
-    // Single shell being marched (step 3). `inner`/`outer` are radii from the
-    // planet centre; `cloudType` drives the height gradient; `noiseScale` is in
-    // planet coordinates (~3e-4, NOT the cube `kNoiseScale`); `drift` advects the
-    // noise only. `coverageBias`/`opacity` are the layer's own (ex-weather).
-    float4 shellRadii;      // x: inner, y: outer, z: cloudType, w: noiseScale
-    float4 shellDrift;      // xy: noise drift (planet coords / s), z: coverageBias, w: opacity
-    uint   layerSlice;      // array slice of this shell in the coverage atlas
-    uint   hasShell;        // 1 if a shell is painted this frame, else 0 (empty sky)
+    // Concentric shells to march, sorted by increasing inner radius (lowest
+    // first → front-to-back). `layerCount` bounds the loop; 0 = empty sky.
+    Shell  shells[kMaxShells];
+    uint   layerCount;
 };
 
 // Temporal amortization (step 7): each frame raymarches only the half-res
@@ -200,7 +222,7 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
         return history.read(px);
     }
 
-    if (u.hasShell == 0u) {
+    if (u.layerCount == 0u) {
         return float4(0.0f);  // no painted shell this frame → empty sky
     }
 
@@ -218,109 +240,126 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
         return float4(0.0f);
     }
 
-    // Coverage is constant along the ray: sample it once at the ray's direction.
+    // Coverage is constant along the ray: sample it once per shell at the ray's
+    // direction (the direction is fixed along the ray).
     float2 covUV = directionToEquirect(rd);
-    float cov = coverage.sample(coverageSampler, covUV, u.layerSlice).r
-              + u.shellDrift.z;  // layer coverage bias
-    cov = saturate(cov);
-    if (cov <= 0.001f) {
-        return float4(0.0f);  // nothing painted in this direction
-    }
 
-    // Planet-space geometry. Camera on the surface, shell a few hundred m above.
+    // Planet-space geometry. Camera on the surface, shells a few hundred m above.
     float3 camPos = float3(0.0f, kPlanetRadius, 0.0f);
-    float inner = u.shellRadii.x;
-    float outer = u.shellRadii.y;
-    float cloudType = u.shellRadii.z;
-    float noiseScale = u.shellRadii.w;
-    float2 drift = u.shellDrift.xy * u.time;
-
-    float3 start = camPos + rd * intersectSphere(camPos, rd, inner);
-    float3 end   = camPos + rd * intersectSphere(camPos, rd, outer);
-
-    // Unbounded step (docs/SHELLS.md §6, reference dmod Sky.metal:663-664). At
-    // grazing angles the traversal reaches ~14× the shell thickness; dividing it
-    // uniformly would give huge steps and banding right where the gaze rests. The
-    // capped march covers only part of the traversal there — acceptable,
-    // transmittance saturates first.
-    float tdist = outer - inner;
-    int steps = int(mix(96.0f, 54.0f, rd.y));
-    float dmod = smoothstep(0.0f, 1.0f, (length(end - start) / tdist) / 14.0f);
-    float ss = mix(tdist, tdist * 4.0f, dmod) / float(steps);
-    float3 p = start;
-    float3 stepVec = rd * ss;
-
     float3 sunDir = normalize(u.sunDirection.xyz);
     float3 sunColor = u.lightSun.xyz;
     float3 skyAmbient = u.lightAmbient.xyz;
     const int kScatterOctaves = 3;
     float cosTheta = dot(rd, sunDir);
 
-    // Météo (étape 9) : opacité du calque × échelle météo globale.
-    float sigma = kSigma * u.weather.y * u.shellDrift.w;
-    // Light march reach in planet metres, bounded to this shell.
-    float lightStep = tdist * kLightReach / float(kLightSteps);
-
+    // Transmittance and scattered radiance are SHARED across the concentric
+    // shells (docs/SHELLS.md §6): a thin cirrus above doesn't reset the cumulus
+    // below, it composites over it front-to-back as the ray climbs.
     float transmittance = 1.0f;
     float3 scattered = float3(0.0f);
 
-    for (int i = 0; i < steps; ++i, p += stepVec) {
-        float radius = length(p);
-        float hf = (radius - inner) / tdist;          // height_fraction within shell
-        if (hf < 0.0f || hf > 1.0f) {
-            continue;
-        }
-        float g = densityHeightGradient(hf, cloudType);
-        float3 noiseUVW = p * noiseScale + float3(drift.x, drift.y, drift.x);
-        float density = shapeDensity(cov, g, noiseUVW, noise);
-        if (density <= 0.001f) {
-            continue;
+    // Front-to-back over the shells in increasing-altitude order (the lowest is
+    // crossed first by an ascending ray); no per-pixel sorting.
+    for (uint L = 0; L < u.layerCount && L < kMaxShells; ++L) {
+        Shell sh = u.shells[L];
+        if (sh.visible == 0u) {
+            continue;  // layer toggled off
         }
 
-        // Self-shadowing: optical depth toward the sun, bounded to this shell
-        // (decision §11). The light ray re-samples the coverage map at each step's
-        // own direction (§8 alternative): without it, every point's light ray sees
-        // the full painted coverage and the whole stroke reads pitch-black — the
-        // re-sample lets a light ray that exits the painted silhouette brighten the
-        // stroke's edges. One coverage sample per light step.
-        float opticalDepth = 0.0f;
-        for (int j = 0; j < kLightSteps; ++j) {
-            float3 q = p + sunDir * (float(j) + 0.5f) * lightStep;
-            float qHf = (length(q) - inner) / tdist;
-            if (qHf < 0.0f || qHf > 1.0f) {
+        float cov = saturate(coverage.sample(coverageSampler, covUV, sh.layerSlice).r
+                             + sh.drift.z);  // layer coverage bias
+        if (cov <= 0.001f) {
+            continue;  // nothing painted in this direction for this shell
+        }
+
+        float inner = sh.radii.x;
+        float outer = sh.radii.y;
+        float cloudType = sh.radii.z;
+        float noiseScale = sh.radii.w;
+        float2 drift = sh.drift.xy * u.time;
+        float tdist = outer - inner;
+
+        float3 start = camPos + rd * intersectSphere(camPos, rd, inner);
+        float3 end   = camPos + rd * intersectSphere(camPos, rd, outer);
+
+        // Unbounded step (docs/SHELLS.md §6, reference dmod Sky.metal:663-664). At
+        // grazing angles the traversal reaches ~14× the shell thickness; dividing
+        // it uniformly would give huge steps and banding right where the gaze
+        // rests. The capped march covers only part of the traversal there —
+        // acceptable, transmittance saturates first.
+        int steps = int(mix(96.0f, 54.0f, rd.y));
+        float dmod = smoothstep(0.0f, 1.0f, (length(end - start) / tdist) / 14.0f);
+        float ss = mix(tdist, tdist * 4.0f, dmod) / float(steps);
+        float3 p = start;
+        float3 stepVec = rd * ss;
+
+        // Météo (étape 9) : opacité du calque × échelle météo globale.
+        float sigma = kSigma * u.weather.y * sh.drift.w;
+        // Light march reach in planet metres, bounded to this shell.
+        float lightStep = tdist * kLightReach / float(kLightSteps);
+
+        for (int i = 0; i < steps; ++i, p += stepVec) {
+            float radius = length(p);
+            float hf = (radius - inner) / tdist;          // height_fraction within shell
+            if (hf < 0.0f || hf > 1.0f) {
                 continue;
             }
-            float2 qUV = directionToEquirect(normalize(q));
-            float qCov = saturate(coverage.sample(coverageSampler, qUV, u.layerSlice).r
-                                  + u.shellDrift.z);
-            float qg = densityHeightGradient(qHf, cloudType);
-            float3 qUVW = q * noiseScale + float3(drift.x, drift.y, drift.x);
-            opticalDepth += shapeDensity(qCov, qg, qUVW, noise) * lightStep;
-        }
+            float g = densityHeightGradient(hf, cloudType);
+            float3 noiseUVW = p * noiseScale + float3(drift.x, drift.y, drift.x);
+            float density = shapeDensity(cov, g, noiseUVW, noise);
+            if (density <= 0.001f) {
+                continue;
+            }
 
-        // Multiple-scattering approximation (Hillaire / Wrenninge octaves): each
-        // octave lets light penetrate deeper (lower extinction) with a smaller,
-        // more isotropic contribution — so backlit clouds glow.
-        float3 sunLight = float3(0.0f);
-        float attenuation = 1.0f;
-        float weight = 1.0f;
-        float gScale = 1.0f;
-        for (int o = 0; o < kScatterOctaves; ++o) {
-            float beer = exp(-opticalDepth * sigma * attenuation);
-            sunLight += weight * beer * dualPhase(cosTheta, gScale);
-            attenuation *= 0.5f;
-            weight *= 0.55f;
-            gScale *= 0.5f;
-        }
-        sunLight *= sunColor * powder(density);
+            // Self-shadowing: optical depth toward the sun, bounded to this shell
+            // (decision §11, no cross-shell shadowing). The light ray re-samples
+            // the coverage map at each step's own direction (§8 alternative):
+            // without it, every point's light ray sees the full painted coverage
+            // and the whole stroke reads pitch-black — the re-sample lets a light
+            // ray that exits the painted silhouette brighten the stroke's edges.
+            float opticalDepth = 0.0f;
+            for (int j = 0; j < kLightSteps; ++j) {
+                float3 q = p + sunDir * (float(j) + 0.5f) * lightStep;
+                float qHf = (length(q) - inner) / tdist;
+                if (qHf < 0.0f || qHf > 1.0f) {
+                    continue;
+                }
+                float2 qUV = directionToEquirect(normalize(q));
+                float qCov = saturate(coverage.sample(coverageSampler, qUV, sh.layerSlice).r
+                                      + sh.drift.z);
+                float qg = densityHeightGradient(qHf, cloudType);
+                float3 qUVW = q * noiseScale + float3(drift.x, drift.y, drift.x);
+                opticalDepth += shapeDensity(qCov, qg, qUVW, noise) * lightStep;
+            }
 
-        float3 luminance = sunLight + skyAmbient;
-        float extinction = density * sigma * ss;
-        scattered += transmittance * luminance * extinction;
-        transmittance *= exp(-extinction);
+            // Multiple-scattering approximation (Hillaire / Wrenninge octaves):
+            // each octave lets light penetrate deeper (lower extinction) with a
+            // smaller, more isotropic contribution — so backlit clouds glow.
+            float3 sunLight = float3(0.0f);
+            float attenuation = 1.0f;
+            float weight = 1.0f;
+            float gScale = 1.0f;
+            for (int o = 0; o < kScatterOctaves; ++o) {
+                float beer = exp(-opticalDepth * sigma * attenuation);
+                sunLight += weight * beer * dualPhase(cosTheta, gScale);
+                attenuation *= 0.5f;
+                weight *= 0.55f;
+                gScale *= 0.5f;
+            }
+            sunLight *= sunColor * powder(density);
+
+            float3 luminance = sunLight + skyAmbient;
+            float extinction = density * sigma * ss;
+            scattered += transmittance * luminance * extinction;
+            transmittance *= exp(-extinction);
+
+            if (transmittance < 0.01f) {
+                break;  // opaque from here on within this shell
+            }
+        }
 
         if (transmittance < 0.01f) {
-            break;  // opaque from here on
+            break;  // opaque: higher shells are hidden
         }
     }
 
