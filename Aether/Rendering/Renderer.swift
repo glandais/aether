@@ -4,8 +4,9 @@ import os
 import simd
 
 /// Uniforms du shader de nuage. La disposition mémoire doit correspondre à
-/// `CloudUniforms` dans `Cloud.metal`. Les cubes (centre + demi-taille) sont
-/// passés à part dans un buffer (`CloudCubeGPU`), `cubeCount` en donne le nombre.
+/// `CloudUniforms` dans `Cloud.metal`. Modèle multi-coquilles (étape 3, une seule
+/// coquille) : la forme vient de la couverture directionnelle peinte (atlas 2D
+/// array) et de la géométrie de coquille, plus de cubes.
 private struct CloudUniforms {
     var resolution: SIMD2<Float>
     var time: Float
@@ -19,8 +20,12 @@ private struct CloudUniforms {
     var camRight: SIMD4<Float>
     var camUp: SIMD4<Float>
     var camForward: SIMD4<Float>
-    var cubeCount: UInt32   // nombre de cubes valides dans le buffer `cubes`
-    var atlasSlabs: UInt32  // nombre total de slabs de l'atlas (= CloudCube.maxCount)
+    // Coquille marchée (étape 3). Rayons planète, profil vertical, échelle de
+    // bruit (coords planète) et dérive ; biais de couverture + opacité du calque.
+    var shellRadii: SIMD4<Float>  // x: inner ; y: outer ; z: cloudType ; w: noiseScale
+    var shellDrift: SIMD4<Float>  // xy: dérive bruit ; z: coverageBias ; w: opacity
+    var layerSlice: UInt32        // tranche de la coquille dans l'atlas de couverture
+    var hasShell: UInt32          // 1 si une coquille est peinte cette frame
 }
 
 /// Un cube de nuage prêt pour le GPU : centre + demi-taille monde. Disposition
@@ -600,6 +605,14 @@ final class Renderer: NSObject, MTKViewDelegate {
         lastCameraForward = cameraForward
         lastCameraTanHalfFov = cameraTanHalfFov
 
+        // Coquille marchée (étape 3) : la première coquille `cumulus` peinte. Sa
+        // tranche dans l'atlas de couverture = son index dans `pendingLayers`
+        // (ordre de cuisson du baker). Absente → ciel vide (`hasShell = 0`).
+        let cappedLayers = Array(pendingLayers.prefix(CloudLayer.maxCount))
+        let shellIndex = cappedLayers.firstIndex { $0.genus == .cumulus }
+        let shellLayer = shellIndex.map { cappedLayers[$0] }
+        let shellSpec = shellLayer?.genus.shell
+
         var uniforms = CloudUniforms(
             resolution: SIMD2(Float(halfWidth), Float(halfHeight)),
             time: elapsed,
@@ -613,8 +626,14 @@ final class Renderer: NSObject, MTKViewDelegate {
             camRight: SIMD4(cameraRight.x, cameraRight.y, cameraRight.z, 0.0),
             camUp: SIMD4(cameraUp.x, cameraUp.y, cameraUp.z, 0.0),
             camForward: SIMD4(cameraForward.x, cameraForward.y, cameraForward.z, 0.0),
-            cubeCount: UInt32(cubeCount),
-            atlasSlabs: UInt32(CloudCube.maxCount)
+            shellRadii: SIMD4(
+                shellSpec?.inner ?? 0, shellSpec?.outer ?? 0,
+                shellSpec?.cloudType ?? 0, shellSpec?.noiseScale ?? 0),
+            shellDrift: SIMD4(
+                shellSpec?.drift.x ?? 0, shellSpec?.drift.y ?? 0,
+                shellLayer?.coverageBias ?? 0, shellLayer?.opacity ?? 1),
+            layerSlice: UInt32(shellIndex ?? 0),
+            hasShell: shellIndex != nil ? 1 : 0
         )
         var temporal = CloudTemporal(
             activeIndex: Renderer.activeOrder[frameIndex % 4],
@@ -632,10 +651,12 @@ final class Renderer: NSObject, MTKViewDelegate {
         cloudEncoder.setRenderPipelineState(cloudPipeline)
         cloudEncoder.setFragmentBytes(&uniforms, length: MemoryLayout<CloudUniforms>.stride, index: 0)
         cloudEncoder.setFragmentBytes(&temporal, length: MemoryLayout<CloudTemporal>.stride, index: 1)
-        cloudEncoder.setFragmentBuffer(cubeBuffer, offset: 0, index: 2)
-        cloudEncoder.setFragmentTexture(densityVolumes[currentVolumeIndex], index: 0)
         cloudEncoder.setFragmentTexture(noiseTexture, index: 1)
         cloudEncoder.setFragmentTexture(historyTarget, index: 2)
+        // Atlas de couverture directionnelle (modèle multi-coquilles) :
+        // échantillonné en `filter::linear` (R8Unorm filtrable).
+        cloudEncoder.setFragmentTexture(coverageBaker.atlas, index: 3)
+        cloudEncoder.setFragmentSamplerState(sampler, index: 0)
         cloudEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         cloudEncoder.endEncoding()
 

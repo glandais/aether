@@ -49,11 +49,8 @@ final class CoverageBaker {
     private var currentIndex = 0
     private var bakes: [LayerBake] = []
 
-    // Atlas courant lisible par le raymarch (échantillonné en `filter::linear`).
-    // Branché dans `Cloud.metal` à l'étape 3 (raymarch concentrique) ; cuit dès
-    // maintenant pour valider le stamp directionnel (étape 2). Marqué retenu : la
-    // lecture (par le GPU à l'étape 3) n'est pas encore visible de Periphery.
-    // periphery:ignore
+    // Atlas courant lisible par le raymarch concentrique (`Cloud.metal`),
+    // échantillonné en `filter::linear` (R8Unorm filtrable sur GPU iOS).
     var atlas: MTLTexture { atlases[currentIndex] }
 
     init?(device: MTLDevice, commandQueue: MTLCommandQueue, library: MTLLibrary) {

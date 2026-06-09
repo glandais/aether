@@ -1,14 +1,22 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// Pipeline step 4: the cloud's shape now comes from a painted 3D density volume
-// (see BrushPaint.metal) instead of an analytic sphere. The raymarch confines
-// itself to the volume's AABB, samples the painted density as the base shape,
-// then erodes/details it with the precomputed Perlin-Worley noise (step 3,
-// CloudNoise.metal), following Schneider's authoring model. View-ray
-// transmittance is Beer-Lambert (Scratchapixel); the light-march toward a fixed
-// sun gives self-shadowing. Henyey-Greenstein phase, powder and atmospheric
-// scattering remain deferred to step 5.
+// Multi-shell model (docs/SHELLS.md §6). The cloud's shape no longer comes from a
+// finite painted AABB but from a concentric spherical SHELL wrapping a small
+// "planet" (the realtime_clouds reference). The camera sits on the surface; a
+// ray that climbs (rd.y > 0) crosses the shell between intersectSphere(inner) and
+// intersectSphere(outer). "Where there is cloud" is a painted directional
+// coverage map (azimuth × elevation) sampled ONCE per pixel — coverage is
+// constant along a view ray. The vertical relief comes for free from the shell
+// geometry (height_fraction) and the 3D noise (sampled in p, which varies along
+// the ray). This step raymarches a SINGLE cumulus shell; step 4 stacks shells.
+//
+// Lighting is unchanged from the cube path: multiple-scattering octaves, dual-lobe
+// Henyey-Greenstein phase, powder, scene sun colour / sky ambient (resolved on the
+// CPU). The light march is bounded to the current shell (self-shadowing only,
+// decision §11); it re-samples the coverage map per light step (§8 alternative) so
+// edges of a painted stroke aren't over-shadowed. Temporal 2×2 amortization and
+// the premultiplied composite are kept.
 
 struct CloudUniforms {
     float2 resolution;
@@ -20,26 +28,20 @@ struct CloudUniforms {
     float4 lightSun;        // xyz: sun colour × intensity (by altitude & exposure)
     float4 lightAmbient;    // xyz: sky ambient fill
     // Camera→world basis of the gaze (yaw + pitch), shared with the sky pass.
-    // The view ray is reconstructed from these so the world-fixed cloud boxes can
-    // be looked around / orbited; at the identity basis it faces North (-Z).
+    // The view ray is reconstructed from these; at the identity basis it faces
+    // North (-Z), matching the coverage stamp's `dir` convention.
     float4 camRight;
     float4 camUp;
     float4 camForward;
-    uint   cubeCount;       // number of valid entries in the `cubes` buffer
-    uint   atlasSlabs;      // total slabs stacked in the density atlas (= CloudCube.maxCount)
+    // Single shell being marched (step 3). `inner`/`outer` are radii from the
+    // planet centre; `cloudType` drives the height gradient; `noiseScale` is in
+    // planet coordinates (~3e-4, NOT the cube `kNoiseScale`); `drift` advects the
+    // noise only. `coverageBias`/`opacity` are the layer's own (ex-weather).
+    float4 shellRadii;      // x: inner, y: outer, z: cloudType, w: noiseScale
+    float4 shellDrift;      // xy: noise drift (planet coords / s), z: coverageBias, w: opacity
+    uint   layerSlice;      // array slice of this shell in the coverage atlas
+    uint   hasShell;        // 1 if a shell is painted this frame, else 0 (empty sky)
 };
-
-// One cloud cube: its world AABB. Mirrors `CloudCubeGPU` in Renderer.swift. Its
-// painted density lives in slab `i` of the atlas (depth [i·48, (i+1)·48)).
-struct CloudCubeGPU {
-    float4 center;          // xyz: world-space center of the cube
-    float4 halfSize;        // xyz: world-space half-extents of the cube AABB
-};
-
-// Capacity ceiling for the per-ray hit arrays in `cloud_fragment` (a compile-time
-// array bound, NOT the cube count — that comes from `u.atlasSlabs`). Only needs to
-// be ≥ CloudCube.maxCount; the gather clamps to it.
-#define kMaxCubeHits 16
 
 // Temporal amortization (step 7): each frame raymarches only the half-res
 // pixels whose 2×2 cell index matches `activeIndex`; the rest reuse history.
@@ -53,15 +55,19 @@ struct CloudInOut {
     float2 ndc;             // clip-space xy, interpolated across the screen
 };
 
-constant float kNoiseScale = 0.42f;    // world units → noise texture frequency
-constant float kSigma = 11.0f;         // extinction coefficient
-constant float kBoxFeather = 0.12f;    // fade density near the AABB faces (no hard cube)
-constant int   kViewSteps = 64;
+// Planet geometry (realtime_clouds reference, Sky.metal:295). The camera rests on
+// the surface; cloud shells live a few hundred metres to a couple km above it.
+constant float kPlanetRadius = 200000.0f;
+// Extinction per metre of cloud. Planet-scale steps are hundreds of metres long
+// (vs the cube path's ~0.1 world units), so the coefficient is correspondingly
+// small: a few hundred metres of solid cloud reach opacity. Tuned by capture.
+constant float kSigma = 0.0045f;
 constant int   kLightSteps = 6;
-constant float kLightStep = 0.15f;
+// Light-march reach as a fraction of the shell thickness (bounded to this shell;
+// self-shadowing only, decision §11). Scaled per layer by its thickness below.
+constant float kLightReach = 0.6f;
 
-// Painted density: clamp at the edges. Noise: repeat (tileable, seamless).
-constexpr sampler shapeSampler(address::clamp_to_edge, filter::linear);
+// Noise: repeat (tileable, seamless). Coverage atlas uses a host sampler.
 constexpr sampler noiseSampler(address::repeat, filter::linear, mip_filter::none);
 
 static inline float remap(float v, float l0, float h0, float l1, float h1) {
@@ -91,69 +97,75 @@ static inline float powder(float density) {
     return 1.0f - exp(-density * 3.0f);
 }
 
-// Density at world point `p`: painted shape from `shape`, detailed by `noise`.
-// `coverageBias` (from the weather) fills out or erodes the painted silhouette.
-// `cubeIndex` selects the cube's slab in the density atlas: the local depth
-// `uvw.z` is remapped into slab `cubeIndex` of `slabCount`.
-static inline float cloudDensity(float3 p, float time, float coverageBias,
-                                 texture3d<float> shape, texture3d<float> noise,
-                                 float3 boxMin, float3 boxSize, int cubeIndex, int slabCount) {
-    float3 uvw = (p - boxMin) / boxSize;
-    if (any(uvw < 0.0f) || any(uvw > 1.0f)) {
-        return 0.0f;
-    }
-    // Address this cube's slab in the stacked atlas.
-    float3 atlasUVW = float3(uvw.xy, (float(cubeIndex) + uvw.z) / float(slabCount));
-    float painted = saturate(shape.sample(shapeSampler, atlasUVW).r + coverageBias);
+// MARK: - Shell geometry (ported from Sky.metal:511-535)
+
+// Vertical density profile of a cloud type within its shell. Ported verbatim from
+// the reference (mixGradients / densityHeightGradient, Sky.metal:511-525): a
+// `cloudType` of 0 is a flat stratus, 1 a tall budding cumulus. Multiplied into
+// the painted coverage so a shell reads thin at its floor/ceiling, full at its
+// belly.
+static inline float4 mixGradients(float cloudType) {
+    const float4 STRATUS_GRADIENT = float4(0.02f, 0.05f, 0.09f, 0.11f);
+    const float4 STRATOCUMULUS_GRADIENT = float4(0.02f, 0.2f, 0.48f, 0.625f);
+    const float4 CUMULUS_GRADIENT = float4(0.01f, 0.0625f, 0.78f, 1.0f);
+    float stratus = 1.0f - clamp(cloudType * 2.0f, 0.0f, 1.0f);
+    float stratocumulus = 1.0f - abs(cloudType - 0.5f) * 2.0f;
+    float cumulus = clamp(cloudType - 0.5f, 0.0f, 1.0f) * 2.0f;
+    return STRATUS_GRADIENT * stratus
+         + STRATOCUMULUS_GRADIENT * stratocumulus
+         + CUMULUS_GRADIENT * cumulus;
+}
+
+static inline float densityHeightGradient(float heightFrac, float cloudType) {
+    float4 g = mixGradients(cloudType);
+    return smoothstep(g.x, g.y, heightFrac) - smoothstep(g.z, g.w, heightFrac);
+}
+
+// Ray/sphere intersection at radius r, returning the larger root scaled into a
+// ray parameter t (ported from Sky.metal:527-535). `pos` is the eye in planet
+// coordinates, `dir` the (unit) view ray.
+static inline float intersectSphere(float3 pos, float3 dir, float r) {
+    float a = dot(dir, dir);
+    float b = 2.0f * dot(dir, pos);
+    float c = dot(pos, pos) - r * r;
+    float d = sqrt(b * b - 4.0f * a * c);
+    float p = -b - d;
+    float p2 = -b + d;
+    return max(p, p2) / (2.0f * a);
+}
+
+// MARK: - Painted coverage
+
+// Map a (unit) sky direction to the equirectangular upper-hemisphere coverage UV.
+// Exact inverse of the stamp kernel's `dir` (BrushPaint.metal:161-164):
+// uv.x = az/(2π)+0.5 with az = atan2(rd.x, -rd.z) (-Z = North → uv.x = 0.5),
+// uv.y = asin(rd.y)/(π/2) (elevation over the upper hemisphere).
+static inline float2 directionToEquirect(float3 rd) {
+    float az = atan2(rd.x, -rd.z);
+    float el = asin(clamp(rd.y, -1.0f, 1.0f));
+    return float2(az / (2.0f * M_PI_F) + 0.5f, el / (M_PI_F * 0.5f));
+}
+
+// Painted density at planet point `p`. `cov` is the per-pixel coverage (constant
+// along the ray), `g` the shell's height gradient, `noiseUVW` the drifting noise
+// coordinate. Keeps Aether's remap chain (calibrated for painting) MULTIPLIED by
+// the height gradient — deliberately NOT the reference's smoothstep(0.6,1.3)
+// coverage window, which would erase the lower half of every stroke (docs/SHELLS.md
+// note "shapeFrom" §6).
+static inline float shapeDensity(float cov, float g, float3 noiseUVW,
+                                 texture3d<float> noise) {
+    float painted = saturate(cov);
     if (painted <= 0.001f) {
         return 0.0f;
     }
-
-    // Feather the painted shape toward the AABB faces so the box itself is never
-    // visible as a hard cube — the cloud dissolves into the sky at its bounds.
-    float3 edge = min(uvw, 1.0f - uvw);
-    float boxFade = smoothstep(0.0f, kBoxFeather, min(edge.x, min(edge.y, edge.z)));
-    painted *= boxFade;
-    if (painted <= 0.001f) {
-        return 0.0f;
-    }
-
-    // Slow drift gives the cloud a contemplative, breathing quality.
-    float3 nuvw = p * kNoiseScale
-                + float3(time * 0.01f, time * 0.004f, time * 0.006f);
-    float4 n = noise.sample(noiseSampler, nuvw);
-
+    float4 n = noise.sample(noiseSampler, noiseUVW);
     // The painted coverage shapes the Perlin-Worley base...
     float base = saturate(remap(n.r, 1.0f - painted, 1.0f, 0.0f, 1.0f));
     // ...and the Worley channels erode the detail.
     float detail = n.g * 0.625f + n.b * 0.25f + n.a * 0.125f;
     float density = remap(base, detail * 0.55f, 1.0f, 0.0f, 1.0f);
-    return saturate(density);
-}
-
-// Accumulated density toward the sun (optical depth before extinction), used by
-// the multiple-scattering octaves below.
-static inline float lightOpticalDepth(float3 p, float3 sunDir, float time, float coverageBias,
-                                      texture3d<float> shape, texture3d<float> noise,
-                                      float3 boxMin, float3 boxSize, int cubeIndex, int slabCount) {
-    float opticalDepth = 0.0f;
-    for (int i = 0; i < kLightSteps; ++i) {
-        float3 q = p + sunDir * (float(i) + 0.5f) * kLightStep;
-        opticalDepth += cloudDensity(q, time, coverageBias, shape, noise, boxMin, boxSize, cubeIndex, slabCount) * kLightStep;
-    }
-    return opticalDepth;
-}
-
-// Slab-method ray/AABB intersection. Returns near/far t in .xy.
-static inline float2 intersectBox(float3 ro, float3 rd, float3 boxMin, float3 boxMax) {
-    float3 invDir = 1.0f / rd;
-    float3 t0 = (boxMin - ro) * invDir;
-    float3 t1 = (boxMax - ro) * invDir;
-    float3 tSmall = min(t0, t1);
-    float3 tBig = max(t0, t1);
-    float tNear = max(max(tSmall.x, tSmall.y), tSmall.z);
-    float tFar = min(min(tBig.x, tBig.y), tBig.z);
-    return float2(tNear, tFar);
+    // The vertical profile of this cloud type carves the shell's floor/ceiling.
+    return saturate(density) * g;
 }
 
 vertex CloudInOut cloud_vertex(uint vertexID [[vertex_id]]) {
@@ -174,146 +186,141 @@ vertex CloudInOut cloud_vertex(uint vertexID [[vertex_id]]) {
 fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
                                constant CloudUniforms &u [[buffer(0)]],
                                constant CloudTemporal &temporal [[buffer(1)]],
-                               constant CloudCubeGPU *cubes [[buffer(2)]],
-                               texture3d<float> shape [[texture(0)]],
                                texture3d<float> noise [[texture(1)]],
+                               texture2d_array<float> coverage [[texture(3)]],
+                               sampler coverageSampler [[sampler(0)]],
                                texture2d<float, access::read> history [[texture(2)]]) {
     // Temporal amortization: only the active 2×2 cell is raymarched this frame;
-    // the others reuse the previous frame — valid only while the camera is
-    // still (same pixel = same ray). While the gaze moves the ray under each
-    // pixel changes every frame, so reusing history would smear; raymarch all.
+    // the others reuse the previous frame — valid only while the camera is still
+    // (same pixel = same ray). While the gaze moves the ray under each pixel
+    // changes, so reusing history would smear; raymarch all.
     uint2 px = uint2(in.position.xy);
     uint cellIndex = (px.y & 1) * 2 + (px.x & 1);
     if (temporal.cameraMoving == 0 && cellIndex != temporal.activeIndex) {
         return history.read(px);
     }
 
-    // Reconstruct the world-space view ray from the camera→world basis (mirror
-    // of `sky_background_fragment`), so the world-fixed cloud boxes can be looked
-    // around. `in.ndc` is already clip-space (+Y up) from `cloud_vertex`.
+    if (u.hasShell == 0u) {
+        return float4(0.0f);  // no painted shell this frame → empty sky
+    }
+
+    // Reconstruct the world-space view ray from the camera→world basis (mirror of
+    // the sky pass). `in.ndc` is already clip-space (+Y up) from `cloud_vertex`.
     float2 ndc = in.ndc;
-    float3 ro = float3(0.0f, 0.0f, 0.0f);
     float3 rd = normalize(
         ndc.x * u.camera.x * u.aspect * u.camRight.xyz +
         ndc.y * u.camera.x * u.camUp.xyz +
         u.camForward.xyz);
 
-    // Gather the cubes this ray crosses (near/far t + cube index).
-    int n = min(int(u.cubeCount), kMaxCubeHits);
-    int slabCount = int(u.atlasSlabs);
-    float hitNear[kMaxCubeHits];
-    float hitFar[kMaxCubeHits];
-    int   hitIdx[kMaxCubeHits];
-    int   hitCount = 0;
-    float totalLen = 0.0f;
-    for (int i = 0; i < n; ++i) {
-        float3 c = cubes[i].center.xyz;
-        float3 h = cubes[i].halfSize.xyz;
-        float2 hit = intersectBox(ro, rd, c - h, c + h);
-        float tn = max(hit.x, 0.0f);
-        float tf = hit.y;
-        if (tf > tn) {
-            hitNear[hitCount] = tn;
-            hitFar[hitCount] = tf;
-            hitIdx[hitCount] = i;
-            totalLen += (tf - tn);
-            hitCount++;
-        }
-    }
-    if (hitCount == 0) {
-        return float4(0.0f);  // ray misses every cube
+    // Below the horizon there is no shell to cross (the coverage map stops at
+    // elevation 0). Match the reference: only ascending rays carry cloud.
+    if (rd.y <= 0.0f) {
+        return float4(0.0f);
     }
 
-    // Sort the hit segments by near distance (insertion sort, ≤ kMaxCubeHits) so we
-    // composite strictly front-to-back across cubes.
-    for (int i = 1; i < hitCount; ++i) {
-        float kn = hitNear[i], kf = hitFar[i];
-        int ki = hitIdx[i];
-        int j = i - 1;
-        while (j >= 0 && hitNear[j] > kn) {
-            hitNear[j + 1] = hitNear[j];
-            hitFar[j + 1] = hitFar[j];
-            hitIdx[j + 1] = hitIdx[j];
-            j--;
-        }
-        hitNear[j + 1] = kn;
-        hitFar[j + 1] = kf;
-        hitIdx[j + 1] = ki;
+    // Coverage is constant along the ray: sample it once at the ray's direction.
+    float2 covUV = directionToEquirect(rd);
+    float cov = coverage.sample(coverageSampler, covUV, u.layerSlice).r
+              + u.shellDrift.z;  // layer coverage bias
+    cov = saturate(cov);
+    if (cov <= 0.001f) {
+        return float4(0.0f);  // nothing painted in this direction
     }
 
-    // Global step budget: one uniform step size shared across every hit segment,
-    // so the total marched steps stay near kViewSteps regardless of cube count.
-    float stepSize = max(totalLen / float(kViewSteps), 1.0e-4f);
+    // Planet-space geometry. Camera on the surface, shell a few hundred m above.
+    float3 camPos = float3(0.0f, kPlanetRadius, 0.0f);
+    float inner = u.shellRadii.x;
+    float outer = u.shellRadii.y;
+    float cloudType = u.shellRadii.z;
+    float noiseScale = u.shellRadii.w;
+    float2 drift = u.shellDrift.xy * u.time;
+
+    float3 start = camPos + rd * intersectSphere(camPos, rd, inner);
+    float3 end   = camPos + rd * intersectSphere(camPos, rd, outer);
+
+    // Unbounded step (docs/SHELLS.md §6, reference dmod Sky.metal:663-664). At
+    // grazing angles the traversal reaches ~14× the shell thickness; dividing it
+    // uniformly would give huge steps and banding right where the gaze rests. The
+    // capped march covers only part of the traversal there — acceptable,
+    // transmittance saturates first.
+    float tdist = outer - inner;
+    int steps = int(mix(96.0f, 54.0f, rd.y));
+    float dmod = smoothstep(0.0f, 1.0f, (length(end - start) / tdist) / 14.0f);
+    float ss = mix(tdist, tdist * 4.0f, dmod) / float(steps);
+    float3 p = start;
+    float3 stepVec = rd * ss;
+
     float3 sunDir = normalize(u.sunDirection.xyz);
-
-    // Scene-aware lighting: sun colour/intensity by altitude × the photo's
-    // exposure, and a matching sky ambient (resolved on the CPU).
     float3 sunColor = u.lightSun.xyz;
     float3 skyAmbient = u.lightAmbient.xyz;
     const int kScatterOctaves = 3;
-
     float cosTheta = dot(rd, sunDir);
 
-    // Météo (étape 9) : biais de couverture sur la silhouette + échelle d'opacité.
-    float coverageBias = u.weather.x;
-    float sigma = kSigma * u.weather.y;
+    // Météo (étape 9) : opacité du calque × échelle météo globale.
+    float sigma = kSigma * u.weather.y * u.shellDrift.w;
+    // Light march reach in planet metres, bounded to this shell.
+    float lightStep = tdist * kLightReach / float(kLightSteps);
 
     float transmittance = 1.0f;
     float3 scattered = float3(0.0f);
 
-    // March each cube segment in turn, front-to-back, carrying transmittance and
-    // in-scatter across cubes (overlap is fine: each cube contributes its slab).
-    for (int s = 0; s < hitCount; ++s) {
-        int ci = hitIdx[s];
-        float3 c = cubes[ci].center.xyz;
-        float3 h = cubes[ci].halfSize.xyz;
-        float3 boxMin = c - h;
-        float3 boxSize = h * 2.0f;
-        float tn = hitNear[s];
-        float tf = hitFar[s];
-        int steps = min(int(ceil((tf - tn) / stepSize)), kViewSteps);
-
-        for (int i = 0; i < steps; ++i) {
-            float t = tn + (float(i) + 0.5f) * stepSize;
-            if (t > tf) {
-                break;
-            }
-            float3 p = ro + rd * t;
-
-            float density = cloudDensity(p, u.time, coverageBias, shape, noise, boxMin, boxSize, ci, slabCount);
-            if (density > 0.001f) {
-                float opticalDepth = lightOpticalDepth(
-                    p, sunDir, u.time, coverageBias, shape, noise, boxMin, boxSize, ci, slabCount);
-
-                // Multiple-scattering approximation (Hillaire / Wrenninge octaves):
-                // each octave lets light penetrate deeper (lower extinction) with a
-                // smaller, more isotropic contribution — so backlit clouds glow.
-                float3 sunLight = float3(0.0f);
-                float attenuation = 1.0f;
-                float weight = 1.0f;
-                float gScale = 1.0f;
-                for (int o = 0; o < kScatterOctaves; ++o) {
-                    float beer = exp(-opticalDepth * sigma * attenuation);
-                    sunLight += weight * beer * dualPhase(cosTheta, gScale);
-                    attenuation *= 0.5f;
-                    weight *= 0.55f;
-                    gScale *= 0.5f;
-                }
-                sunLight *= sunColor * powder(density);
-
-                float3 luminance = sunLight + skyAmbient;
-                float extinction = density * sigma * stepSize;
-                // In-scattered radiance integrated against current transmittance.
-                scattered += transmittance * luminance * extinction;
-                transmittance *= exp(-extinction);
-
-                if (transmittance < 0.01f) {
-                    break;  // early-out: the cloud is opaque from here on
-                }
-            }
+    for (int i = 0; i < steps; ++i, p += stepVec) {
+        float radius = length(p);
+        float hf = (radius - inner) / tdist;          // height_fraction within shell
+        if (hf < 0.0f || hf > 1.0f) {
+            continue;
         }
+        float g = densityHeightGradient(hf, cloudType);
+        float3 noiseUVW = p * noiseScale + float3(drift.x, drift.y, drift.x);
+        float density = shapeDensity(cov, g, noiseUVW, noise);
+        if (density <= 0.001f) {
+            continue;
+        }
+
+        // Self-shadowing: optical depth toward the sun, bounded to this shell
+        // (decision §11). The light ray re-samples the coverage map at each step's
+        // own direction (§8 alternative): without it, every point's light ray sees
+        // the full painted coverage and the whole stroke reads pitch-black — the
+        // re-sample lets a light ray that exits the painted silhouette brighten the
+        // stroke's edges. One coverage sample per light step.
+        float opticalDepth = 0.0f;
+        for (int j = 0; j < kLightSteps; ++j) {
+            float3 q = p + sunDir * (float(j) + 0.5f) * lightStep;
+            float qHf = (length(q) - inner) / tdist;
+            if (qHf < 0.0f || qHf > 1.0f) {
+                continue;
+            }
+            float2 qUV = directionToEquirect(normalize(q));
+            float qCov = saturate(coverage.sample(coverageSampler, qUV, u.layerSlice).r
+                                  + u.shellDrift.z);
+            float qg = densityHeightGradient(qHf, cloudType);
+            float3 qUVW = q * noiseScale + float3(drift.x, drift.y, drift.x);
+            opticalDepth += shapeDensity(qCov, qg, qUVW, noise) * lightStep;
+        }
+
+        // Multiple-scattering approximation (Hillaire / Wrenninge octaves): each
+        // octave lets light penetrate deeper (lower extinction) with a smaller,
+        // more isotropic contribution — so backlit clouds glow.
+        float3 sunLight = float3(0.0f);
+        float attenuation = 1.0f;
+        float weight = 1.0f;
+        float gScale = 1.0f;
+        for (int o = 0; o < kScatterOctaves; ++o) {
+            float beer = exp(-opticalDepth * sigma * attenuation);
+            sunLight += weight * beer * dualPhase(cosTheta, gScale);
+            attenuation *= 0.5f;
+            weight *= 0.55f;
+            gScale *= 0.5f;
+        }
+        sunLight *= sunColor * powder(density);
+
+        float3 luminance = sunLight + skyAmbient;
+        float extinction = density * sigma * ss;
+        scattered += transmittance * luminance * extinction;
+        transmittance *= exp(-extinction);
+
         if (transmittance < 0.01f) {
-            break;  // opaque: no farther cube can contribute
+            break;  // opaque from here on
         }
     }
 
