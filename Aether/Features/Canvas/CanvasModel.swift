@@ -29,6 +29,15 @@ final class CanvasModel {
     var activeGenus: CloudGenus = .cumulus
     private(set) var isDrawing = false
 
+    /// Défauts par calque issus de la météo statique du paysage (`CloudParameters`
+    /// → `WeatherSnapshot`, cf. `docs/SHELLS.md` §4/§12). Appliqués **à la création
+    /// d'un calque** : un paysage couvert ouvre des calques plus pleins (biais de
+    /// couverture positif) et plus opaques, un paysage dégagé l'inverse. Les
+    /// réglages par calque (opacité de l'étape 5) les surchargent ensuite. Décision
+    /// §12 : mêmes valeurs par défaut pour tous les calques.
+    private var defaultCoverageBias: Float = 0
+    private var defaultOpacity: Float = 1
+
     /// Rayon et adoucissement du pinceau, en coordonnées normalisées.
     var brushRadius: Float = 0.08
     var brushSoftness: Float = 0.55
@@ -106,13 +115,26 @@ final class CanvasModel {
     }
 
     /// Ajoute un trait au calque actif (créé si absent), ou — comme pour les cubes
-    /// — à un calque existant du même genre. Garde calques et cubes synchrones.
+    /// — à un calque existant du même genre. Garde calques et cubes synchrones. Un
+    /// calque neuf hérite des défauts météo (`defaultCoverageBias`/`defaultOpacity`).
     private func appendStrokeToActiveLayer(_ stroke: BrushStroke) {
         if let li = layers.firstIndex(where: { $0.genus == activeGenus }) {
             layers[li].strokes.append(stroke)
         } else {
-            layers.append(CloudLayer(genus: activeGenus, strokes: [stroke]))
+            layers.append(CloudLayer(
+                genus: activeGenus, strokes: [stroke],
+                coverageBias: defaultCoverageBias, opacity: defaultOpacity))
         }
+    }
+
+    /// Renseigne les défauts par calque depuis la météo statique du paysage. À
+    /// appeler à l'ouverture de la scène, **avant tout trait** : les calques créés
+    /// ensuite héritent de ces valeurs (décision §12). L'opacité est ramenée au
+    /// domaine du curseur (0…1) — l'échelle de densité météo ≈ 0,6…1,4 sature à 1
+    /// pour les paysages couverts, baisse pour les dégagés.
+    func applySceneDefaults(_ parameters: CloudParameters) {
+        defaultCoverageBias = parameters.coverageBias
+        defaultOpacity = min(max(parameters.densityScale, 0), 1)
     }
 
     /// Allonge le dernier trait du calque actif (miroir d'`extendStroke`).
@@ -201,7 +223,9 @@ final class CanvasModel {
         // portent que des cubes. Tous les traits vont dans le calque actif courant.
         self.layers = cubes.isEmpty
             ? []
-            : [CloudLayer(genus: activeGenus, strokes: cubes.flatMap(\.strokes))]
+            : [CloudLayer(
+                genus: activeGenus, strokes: cubes.flatMap(\.strokes),
+                coverageBias: defaultCoverageBias, opacity: defaultOpacity)]
         self.viewYaw = viewYaw
         self.viewPitch = min(max(viewPitch, -Self.maxPitch), Self.maxPitch)
         self.brushRadius = brushRadius

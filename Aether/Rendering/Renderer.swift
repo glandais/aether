@@ -47,7 +47,6 @@ private struct CloudUniforms {
     var time: Float
     var aspect: Float
     var sunDirection: SIMD4<Float>
-    var weather: SIMD4<Float>
     var camera: SIMD4<Float>  // x: tan(FOV vertical / 2)
     var lightSun: SIMD4<Float>
     var lightAmbient: SIMD4<Float>
@@ -239,10 +238,6 @@ final class Renderer: NSObject, MTKViewDelegate {
     private static let godRayDecay: Float = 0.96
     private static let godRayWeight: Float = 0.04
     private static let godRayIntensity: Float = 0.5
-
-    // Paramètres météo (étape 9), résolus par la Feature depuis la météo
-    // statique du paysage curé. Neutres avant la première mise à jour.
-    private var cloudParameters = CloudParameters.neutral
 
     // Mer rendue sous l'horizon (`.none` = paysage terrestre). Résolue par la
     // Feature depuis le paysage curé.
@@ -457,11 +452,6 @@ final class Renderer: NSObject, MTKViewDelegate {
         sunDirection = direction
     }
 
-    /// Reçoit les paramètres de nuage déjà résolus depuis la météo (Feature).
-    func updateCloudParameters(_ parameters: CloudParameters) {
-        cloudParameters = parameters
-    }
-
     /// Reçoit tan(FOV vertical / 2) de la caméra de la scène (zoom de la photo).
     func updateFieldOfView(_ tanHalfFov: Float) {
         cameraTanHalfFov = max(tanHalfFov, 0.02)
@@ -652,7 +642,6 @@ final class Renderer: NSObject, MTKViewDelegate {
             aspect: aspect,
             // Direction du soleil résolue par l'AstroService (étape 8).
             sunDirection: SIMD4(sunDirection.x, sunDirection.y, sunDirection.z, 0.0),
-            weather: SIMD4(cloudParameters.coverageBias, cloudParameters.densityScale, 0.0, 0.0),
             camera: SIMD4(cameraTanHalfFov, 0.0, 0.0, 0.0),
             lightSun: SIMD4(sunColor.x, sunColor.y, sunColor.z, 0.0),
             lightAmbient: SIMD4(skyAmbient.x, skyAmbient.y, skyAmbient.z, 0.0),

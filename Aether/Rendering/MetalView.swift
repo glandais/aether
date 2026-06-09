@@ -22,7 +22,6 @@ struct MetalView: UIViewRepresentable {
     var groundLight: Float
     var sunColor: SIMD3<Float>
     var skyAmbient: SIMD3<Float>
-    var cloudParameters: CloudParameters
     var sea: SeaSurface
     /// Direction monde de la lune + clair de lune, pour le reflet sur la mer.
     var moonSkyDirection: SIMD3<Float>
@@ -72,7 +71,6 @@ struct MetalView: UIViewRepresentable {
         renderer.updateSky(sunDirection: skySunDirection, atmosphere: atmosphere, groundLight: groundLight)
         renderer.updateDiscs(sunColor: sunDiscColor, moonColor: moonDiscColor)
         renderer.updateLighting(sunColor: sunColor, ambient: skyAmbient)
-        renderer.updateCloudParameters(cloudParameters)
         renderer.updateSea(sea)
         renderer.updateMoon(direction: moonSkyDirection, glint: moonGlint, nightWeight: nightWeight)
         renderer.updateSeaSky(zenith: skyZenithRadiance, horizon: skyHorizonRadiance)

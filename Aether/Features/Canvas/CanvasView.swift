@@ -88,6 +88,9 @@ struct CanvasView: View {
         self.context = context
         self.chromeHidden = chromeHidden
         let model = CanvasModel()
+        // Défauts par calque issus de la météo statique du paysage (étape 6) :
+        // posés avant le `load`, pour que les calques reconstruits en héritent.
+        model.applySceneDefaults(context.cloudParameters)
         if let restored {
             model.load(
                 cubes: restored.cubes, viewYaw: restored.viewYaw, viewPitch: restored.viewPitch,
@@ -546,7 +549,6 @@ struct CanvasView: View {
             groundLight: light.groundLight,
             sunColor: light.color,
             skyAmbient: light.ambient,
-            cloudParameters: context.cloudParameters,
             sea: context.sea,
             moonSkyDirection: light.moonSkyDirection,
             moonGlint: light.moonGlint,

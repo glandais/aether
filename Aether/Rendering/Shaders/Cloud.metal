@@ -49,7 +49,6 @@ struct CloudUniforms {
     float  time;
     float  aspect;
     float4 sunDirection;    // xyz: normalized direction TOWARD the sun
-    float4 weather;         // x: coverage bias, y: density scale (from weather)
     float4 camera;          // x: tan(vertical FOV / 2) — matches the photo's zoom
     float4 lightSun;        // xyz: sun colour × intensity (by altitude & exposure)
     float4 lightAmbient;    // xyz: sky ambient fill
@@ -293,8 +292,10 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
         float3 p = start;
         float3 stepVec = rd * ss;
 
-        // Météo (étape 9) : opacité du calque × échelle météo globale.
-        float sigma = kSigma * u.weather.y * sh.drift.w;
+        // Per-layer opacity (drift.w). The weather density scale (step 6) is baked
+        // into this opacity at scene creation, so there is no separate global
+        // weather factor here — multiplying again would double-count the weather.
+        float sigma = kSigma * sh.drift.w;
         // Light march reach in planet metres, bounded to this shell.
         float lightStep = tdist * kLightReach / float(kLightSteps);
 
