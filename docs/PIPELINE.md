@@ -418,11 +418,12 @@ Shadertoy `Ms2SD1`, portée en MSL — attribution conservée en en-tête de
     les yeux, physiquement correct).
 - **Perf — demi-résolution.** Le raymarch de mer est coûteux. La passe
   **ciel + mer** est rendue **hors écran à demi-résolution** (HDR
-  `cloudColorFormat`, `skyTarget` créé avec les cibles nuage), puis upsamplée
-  (bilinéaire) et composée « over » au passage composite — comme le nuage. La
-  composition empile : ciel+mer upsamplé, puis nuage upsamplé. La **radiance du
-  ciel** est en plus amortie dans le temps (compute compact, cf. étape 7) ; **la
-  mer reste plein régime** car animée. Profilage device (iPhone 13 Pro Max, scène
+  `cloudColorFormat`, `skyTarget` créé avec les cibles nuage), puis composée
+  « over » au passage composite — comme le nuage. L'agrandissement vers le
+  natif est fait par **MetalFX** (cf. « Upscale MetalFX » ci-dessous), ou en
+  bilinéaire plein écran sur le chemin de repli. La **radiance du ciel** est en
+  plus amortie dans le temps (compute compact, cf. étape 7) ; **la mer reste
+  plein régime** car animée. Profilage device (iPhone 13 Pro Max, scène
   3 étages dense) : la session perf a porté l'arrêt de 15 à **39 ips** (nuage puis
   ciel amortis). Reste à gagner : la mer (~7 ms, non amortissable) et les pas du
   raymarch.
@@ -431,6 +432,50 @@ Shadertoy `Ms2SD1`, portée en MSL — attribution conservée en en-tête de
   En **DEBUG**, ce FPS est aussi poussé vers un overlay à l'écran (`DebugHUD` +
   badge `CanvasView`) et le profilage par passe se pilote par variables d'env
   (cf. CLAUDE.md « Profilage perf »).
+
+## Upscale MetalFX (`MTLFXSpatialScaler`) — terminé
+
+L'agrandissement demi-rés → natif est l'affaire d'un **unique étage** : le
+**scaler spatial MetalFX** (edge-aware, entrée couleur seule — pas de motion
+vectors / jitter / depth, le pipeline n'en a pas). L'upsample bilinéaire
+maison n'existe plus que sur le chemin de repli.
+
+- **Chemin MetalFX** (device supporté) : la passe composite (ciel+mer « over »,
+  nuage « over », god rays additifs) est rendue **en demi-rés** dans
+  `compositeTarget` (format du drawable, lectures **1:1** des cibles — le
+  `filter::linear` de `composite_fragment` y est une identité), puis
+  `MTLFXSpatialScaler` agrandit **×2 par axe** (le maximum recommandé pour le
+  scaler spatial) vers `upscaledTarget` (taille du drawable), enfin une passe de
+  présentation copie le résultat dans le drawable (`presentPipeline`, opaque —
+  le drawable d'un `MTKView` est `framebufferOnly`, le scaler ne peut pas
+  l'écrire) et y dessine les **étoiles en natif**. Gains : composition ÷4 (elle
+  tournait en plein écran) et agrandissement bien meilleur que le bilinéaire
+  (bords de nuages, horizon de mer, disque solaire) ; le coût des passes
+  raymarchées ne change pas (déjà demi-rés).
+- **Étoiles après l'upscale** : des points de 2–7 px seraient ramollis par le
+  scaler → dessinés dans la passe de présentation, en natif. Comme elles passent
+  ainsi *après* le blend « over » du nuage, l'occultation se fait **dans le
+  shader** : `star_fragment` échantillonne `cloudAccum` et multiplie par la
+  transmittance `1 − α`. Strictement équivalent à l'ancien ordre
+  étoiles-puis-over (termes additifs, commutent avec le over et les god rays) —
+  le chemin de repli utilise le même shader, parité vérifiable au pixel près.
+- **Mode couleur** `.perceptual` : le composite est déjà tonemappé
+  (display-referred [0,1], format du drawable). Entrée et sortie au même format
+  → aucune variante de pipeline.
+- **Repli** (simulateur, device non supporté, échec de création) : composite
+  directement dans le drawable plein écran avec upsample bilinéaire — le chemin
+  historique, étoiles en fin de passe. **MetalFX est absent du SDK simulateur**
+  (pas seulement non supporté) : tout le chemin est sous `#if canImport(MetalFX)`
+  et le framework est lié par **auto-linking** de l'import (un `sdk:` explicite
+  dans `project.yml` casserait l'édition de liens simulateur). Le flux de
+  vérification par captures simulateur reste donc valide (chemin de repli).
+- **Plomberie** (`Renderer`) : décision unique à l'init
+  (`MTLFXSpatialScalerDescriptor.supportsDevice`, journalisée), création
+  paresseuse `ensureScalerTargets` keyed sur la taille du drawable (re-création
+  sur rotation ; usages de textures = les nôtres ∪ ceux exigés par le scaler),
+  `scalerFailed` dégrade définitivement vers le repli sans retry par frame. En
+  **DEBUG**, `AETHER_SCALE` force le repli (`1`) ou une échelle interne < ½
+  (facteur > 2×, mesure seulement).
 
 ## Soleil & lune dessinés dans le ciel — terminé
 
@@ -497,9 +542,11 @@ nuages**, et **world-locked** (suivent le regard/zoom comme le reste du ciel).
   base caméra, appliquée côté GPU). Un `starRevision` croissant fait que le
   `Renderer` ne reconstruit le buffer que sur changement réel.
 - **Rendering** : `Renderer.updateStars(_:revision:)` ; les points sont dessinés
-  dans la **passe composite plein écran**, **entre** l'upsample du ciel et le
-  nuage (blend **additif**), donc au-dessus du ciel et occlus par le nuage qui
-  suit. `Stars.metal` (`star_vertex`/`star_fragment`) : projection du `worldDirection`
+  **en fin de composition** (blend **additif**), en **résolution native** sur le
+  chemin MetalFX (passe de présentation, après l'upscale — cf. « Upscale
+  MetalFX »), occlus par le nuage **dans le shader** (transmittance `1 − α`
+  échantillonnée dans `cloudAccum`, équivalent à l'ancien ordre étoiles-puis-over).
+  `Stars.metal` (`star_vertex`/`star_fragment`) : projection du `worldDirection`
   par inversion du rayon de `Background.metal` (mêmes `camRight/Up/Forward` +
   `tanHalfFov`/aspect → coïncidence au pixel près), rejet par le clip si derrière
   la caméra ; magnitude → luminosité (flux de Pogson compressé en √) et taille du

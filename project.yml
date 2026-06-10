@@ -34,6 +34,9 @@ targets:
     platform: iOS
     sources:
       - path: Aether
+    # MetalFX (upscale spatial du composite, cf. docs/PIPELINE.md) est lié par
+    # l'auto-linking de l'import Swift : absent du SDK simulateur, un lien
+    # explicite `sdk:` ferait échouer l'édition de liens de ce côté.
     dependencies:
       - package: SwiftAA
       - package: tzf

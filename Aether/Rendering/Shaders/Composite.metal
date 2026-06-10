@@ -1,10 +1,11 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// Pipeline step 7: upsample the half-resolution cloud target and composite it
-// over the full-resolution landscape. The cloud was rendered offscreen (half
-// res, temporally amortized); here it is sampled with bilinear filtering and
-// blended "over" the background with premultiplied alpha.
+// Fullscreen-triangle sample pass, used for every composition draw: sky+sea
+// and cloud "over" blends, god rays (additive), and the final copy of the
+// MetalFX-upscaled composite to the drawable. On the bilinear fallback path
+// the sampler also performs the half→full upsample; on the MetalFX path all
+// reads are 1:1 and the spatial scaler does the only upscale.
 
 struct CompositeInOut {
     float4 position [[position]];

@@ -2,7 +2,12 @@
 using namespace metal;
 
 // Stars pass. Draws the Yale Bright Star Catalog (BSC5) as additive point
-// sprites, composited between the sky and the clouds (so clouds occlude them).
+// sprites at the END of the composition, at native resolution (on the MetalFX
+// path the rest of the frame is upscaled from half res; 2-7 px points must not
+// be). Cloud occlusion happens here: the fragment multiplies by the cloud
+// transmittance (1 - alpha) sampled from the cloud target — mathematically
+// identical to drawing the stars before the premultiplied "over" blend
+// (additive terms commute with it).
 //
 // Unlike the sun and moon, stars do NOT light anything: no halo, no atmosphere
 // contribution — passive dots. Each star carries a world-space direction
@@ -32,6 +37,7 @@ struct StarInOut {
     float4 position [[position]];
     float  pointSize [[point_size]];
     float3 color [[flat]];  // tint × brightness × gates, premultiplied
+    float2 uv [[flat]];     // screen UV of the star centre (cloud occlusion)
 };
 
 // --- Tunable constants ------------------------------------------------------
@@ -82,6 +88,7 @@ vertex StarInOut star_vertex(uint vid [[vertex_id]],
         out.position = float4(0.0, 0.0, 2.0, 1.0);
         out.pointSize = 0.0;
         out.color = float3(0.0);
+        out.uv = float2(0.0);
         return out;
     }
     const float xc = dot(dir, u.camRight.xyz);
@@ -89,6 +96,10 @@ vertex StarInOut star_vertex(uint vid [[vertex_id]],
     const float ndcX = xc / (zc * tanHalfFov * aspect);
     const float ndcY = yc / (zc * tanHalfFov);
     out.position = float4(ndcX, ndcY, 0.0, 1.0);
+    // Top-left-origin screen UV (same mapping as Composite.metal), used to
+    // sample the cloud transmittance. Constant across the point sprite —
+    // negligible over 2-7 px against soft half-res cloud edges.
+    out.uv = float2(ndcX * 0.5 + 0.5, 0.5 - ndcY * 0.5);
 
     // Brightness: Pogson flux, perceptually compressed (raw range ~1600:1).
     const float flux = pow(10.0, -0.4 * (star.dirMag.w - kMagnitudeCutoff));
@@ -113,9 +124,14 @@ vertex StarInOut star_vertex(uint vid [[vertex_id]],
 }
 
 fragment float4 star_fragment(StarInOut in [[stage_in]],
-                              float2 pointCoord [[point_coord]]) {
+                              float2 pointCoord [[point_coord]],
+                              texture2d<float> cloud [[texture(0)]]) {
     // Soft round dot: radial falloff from the sprite centre.
     const float d = length(pointCoord - 0.5) * 2.0;
     const float falloff = smoothstep(1.0, 0.0, d);
-    return float4(in.color * falloff, 0.0);  // additive (alpha unused)
+    // Cloud occlusion: stars are drawn after the cloud "over" blend, so the
+    // occlusion is applied here via the coverage alpha of the cloud target.
+    constexpr sampler cloudSampler(address::clamp_to_edge, filter::linear);
+    const float transmittance = 1.0 - cloud.sample(cloudSampler, in.uv).a;
+    return float4(in.color * falloff * transmittance, 0.0);  // additive (alpha unused)
 }

@@ -2,6 +2,11 @@ import CoreGraphics
 import MetalKit
 import os
 import simd
+#if canImport(MetalFX)
+// Absent du SDK simulateur : tout le chemin MetalFX est compilé conditionnellement,
+// le repli bilinéaire (chemin historique) est le seul code sur simulateur.
+import MetalFX
+#endif
 
 /// Une coquille concentrique prête pour le GPU (modèle multi-coquilles, étape 4).
 /// Disposition mémoire **identique** à `Shell` dans `Cloud.metal` (deux float4 +
@@ -170,6 +175,29 @@ final class Renderer: NSObject, MTKViewDelegate {
     // God rays (rayons crépusculaires) rendus hors écran à demi-rés, composés
     // additivement par-dessus tout au passage composite.
     private var godRayTarget: MTLTexture?
+
+    #if canImport(MetalFX)
+    // MetalFX : le composite est rendu **en demi-rés** (lectures 1:1 des cibles)
+    // puis agrandi ×2 vers le drawable par le scaler spatial — unique étage
+    // d'upscale du pipeline, à la place du bilinéaire plein écran (cf.
+    // `docs/PIPELINE.md`). Absent du SDK simulateur → repli : composite
+    // plein écran avec upsample bilinéaire (chemin historique).
+    private let metalFXEnabled: Bool
+    // Échelle interne du chemin MetalFX (½ = facteur d'upscale 2×, le maximum
+    // recommandé pour le scaler spatial). Surchargée en DEBUG par `AETHER_SCALE`.
+    private let internalScale: Float
+    private var spatialScaler: MTLFXSpatialScaler?
+    private var scalerFailed = false
+    private var compositeTarget: MTLTexture?
+    private var upscaledTarget: MTLTexture?
+    private var scalerOutputWidth = 0
+    private var scalerOutputHeight = 0
+    private let drawableFormat: MTLPixelFormat
+    // Présentation du composite agrandi : copie opaque plein écran (réutilise
+    // `composite_fragment`, sans blending).
+    private let presentPipeline: MTLRenderPipelineState
+    #endif
+
     private var frameIndex = 0
     // Ordre de Bayer 2×2 : répartit les 4 cellules sur 4 frames.
     private static let activeOrder: [UInt32] = [0, 3, 1, 2]
@@ -223,6 +251,12 @@ final class Renderer: NSObject, MTKViewDelegate {
     private static let perfNoSky = ProcessInfo.processInfo.environment["AETHER_PERF_NOSKY"] == "1"
     private static let perfNoSea = ProcessInfo.processInfo.environment["AETHER_PERF_NOSEA"] == "1"
     private static let perfNoCloud = ProcessInfo.processInfo.environment["AETHER_PERF_NOCLOUD"] == "1"
+    #if canImport(MetalFX)
+    // Échelle interne forcée (profilage MetalFX) : `1` force le repli bilinéaire,
+    // une valeur < 0.5 teste un facteur d'upscale > 2× (mesure seulement).
+    private static let debugScale = ProcessInfo.processInfo.environment["AETHER_SCALE"]
+        .flatMap(Float.init)
+    #endif
     #endif
 
     // Étoiles (BSC5) dessinées dans le ciel — purs points additifs, sans
@@ -290,6 +324,26 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
 
         let format = view.colorPixelFormat
+
+        #if canImport(MetalFX)
+        // Décision MetalFX unique à l'init : scaler spatial supporté par le
+        // device ? (Le simulateur n'a même pas le framework → repli compilé.)
+        drawableFormat = format
+        var metalFXSupported = MTLFXSpatialScalerDescriptor.supportsDevice(device)
+        var scale: Float = 0.5
+        #if DEBUG
+        if let forced = Renderer.debugScale {
+            if forced >= 1.0 {
+                metalFXSupported = false
+            } else {
+                scale = max(forced, 0.25)
+            }
+        }
+        #endif
+        metalFXEnabled = metalFXSupported
+        internalScale = scale
+        #endif
+
         do {
             // Ciel atmosphérique dynamique (suit le soleil). `background_vertex`
             // est le triangle plein écran partagé ; échantillonne le paysage
@@ -311,6 +365,13 @@ final class Renderer: NSObject, MTKViewDelegate {
             compositePipeline = try Renderer.makePipeline(
                 device: device, vertex: compositeVertex, fragment: compositeFragment,
                 pixelFormat: format, blend: .premultiplied)
+            #if canImport(MetalFX)
+            // Présentation du composite agrandi par MetalFX : échantillon 1:1
+            // opaque (réutilise `composite_fragment`).
+            presentPipeline = try Renderer.makePipeline(
+                device: device, vertex: compositeVertex, fragment: compositeFragment,
+                pixelFormat: format, blend: .none)
+            #endif
             // Étoiles : points additifs composés sur le ciel, sous le nuage.
             starPipeline = try Renderer.makePipeline(
                 device: device, vertex: starVertex, fragment: starFragment,
@@ -354,6 +415,12 @@ final class Renderer: NSObject, MTKViewDelegate {
         super.init()
 
         log.debug("Renderer initialisé sur \(device.name, privacy: .public)")
+        #if canImport(MetalFX)
+        let metalFXMode = metalFXSupported ? "actif" : "repli bilinéaire"
+        log.info("MetalFX : \(metalFXMode, privacy: .public), échelle \(scale, format: .fixed(precision: 2))")
+        #else
+        log.info("MetalFX : absent du SDK (simulateur) — repli bilinéaire")
+        #endif
     }
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
@@ -472,9 +539,25 @@ final class Renderer: NSObject, MTKViewDelegate {
         let size = view.drawableSize
         let fullWidth = max(Int(size.width), 1)
         let fullHeight = max(Int(size.height), 1)
-        let halfWidth = max(fullWidth / 2, 1)
-        let halfHeight = max(fullHeight / 2, 1)
+        // Échelle interne : ½ (défaut des deux chemins). Chemin MetalFX : le
+        // composite reste à cette résolution (lectures 1:1) et le scaler spatial
+        // agrandit vers le drawable ; repli : upsample bilinéaire plein écran.
+        #if canImport(MetalFX)
+        let wantMetalFX = metalFXEnabled && !scalerFailed
+        let scale = wantMetalFX ? internalScale : 0.5
+        #else
+        let scale: Float = 0.5
+        #endif
+        let halfWidth = max(Int(Float(fullWidth) * scale), 1)
+        let halfHeight = max(Int(Float(fullHeight) * scale), 1)
         ensureCloudTargets(width: halfWidth, height: halfHeight)
+        #if canImport(MetalFX)
+        if wantMetalFX {
+            ensureScalerTargets(
+                fullWidth: fullWidth, fullHeight: fullHeight,
+                halfWidth: halfWidth, halfHeight: halfHeight)
+        }
+        #endif
 
         guard let cloudAccum = cloudAccum,
               let skyAccum = skyAccum,
@@ -671,49 +754,114 @@ final class Renderer: NSObject, MTKViewDelegate {
         godRayEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         godRayEncoder.endEncoding()
 
-        // Passe 3 — composition plein écran : ciel+mer puis nuage, tous deux
-        // demi-rés upsamplés (bilinéaire) et composés « over » prémultiplié.
-        guard let compositeEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
+        // Passes 3+ — composition, upscale MetalFX éventuel, étoiles.
+        encodeComposition(
+            commandBuffer: commandBuffer, drawableDescriptor: descriptor,
+            cloudAccum: cloudAccum, skyTarget: skyTarget, godRayTarget: godRayTarget,
+            aspect: aspect, elapsed: elapsed)
+
+        commandBuffer.present(drawable)
+        commandBuffer.commit()
+        frameIndex &+= 1
+    }
+
+    /// Passe 3 — composition : ciel+mer puis nuage « over » prémultiplié, god
+    /// rays additifs en dernier (rayons diffusés dans l'air entre le nuage et
+    /// l'œil, en surimpression ; la source étant masquée par la couverture, un
+    /// nuage épais devant le soleil n'en produit pas), étoiles en dernier.
+    /// Chemin MetalFX (cf. `docs/PIPELINE.md` « Upscale MetalFX ») : composé en
+    /// demi-rés dans `compositeTarget` (lectures 1:1), agrandi ×2 par le scaler
+    /// spatial, présenté par copie opaque ; les étoiles (points 2-7 px que
+    /// l'upscale ramollirait) se dessinent en natif dans la présentation,
+    /// occultées par la transmittance du nuage dans le shader — strictement
+    /// équivalent à l'ancien ordre étoiles-puis-over (termes additifs). Repli :
+    /// composé directement dans le drawable plein écran (upsample bilinéaire).
+    private func encodeComposition(
+        commandBuffer: MTLCommandBuffer,
+        drawableDescriptor: MTLRenderPassDescriptor,
+        cloudAccum: MTLTexture,
+        skyTarget: MTLTexture,
+        godRayTarget: MTLTexture,
+        aspect: Float,
+        elapsed: Float
+    ) {
+        #if canImport(MetalFX)
+        let metalFXActive = metalFXEnabled && !scalerFailed && spatialScaler != nil
+        #else
+        let metalFXActive = false
+        #endif
+
+        var compositeDescriptor = drawableDescriptor
+        #if canImport(MetalFX)
+        if metalFXActive, let compositeTarget = compositeTarget {
+            let offscreen = MTLRenderPassDescriptor()
+            offscreen.colorAttachments[0].texture = compositeTarget
+            offscreen.colorAttachments[0].loadAction = .dontCare
+            offscreen.colorAttachments[0].storeAction = .store
+            compositeDescriptor = offscreen
+        }
+        #endif
+        guard let compositeEncoder = commandBuffer.makeRenderCommandEncoder(
+            descriptor: compositeDescriptor) else {
             return
         }
         compositeEncoder.setRenderPipelineState(compositePipeline)
         compositeEncoder.setFragmentTexture(skyTarget, index: 0)
         compositeEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
-
-        // Étoiles : points additifs sur le ciel, **avant** le nuage (qui les
-        // occulte). Mêmes base caméra / FOV / aspect que le ciel → coïncidence
-        // au pixel près. Night-gated par `nightWeight`.
-        if starCount > 0, let starBuffer = starBuffer {
-            var starUniforms = StarUniforms(
-                camRight: SIMD4(cameraRight.x, cameraRight.y, cameraRight.z, 0.0),
-                camUp: SIMD4(cameraUp.x, cameraUp.y, cameraUp.z, 0.0),
-                camForward: SIMD4(cameraForward.x, cameraForward.y, cameraForward.z, 0.0),
-                params: SIMD4(cameraTanHalfFov, aspect, nightWeight, elapsed))
-            compositeEncoder.setRenderPipelineState(starPipeline)
-            compositeEncoder.setVertexBuffer(starBuffer, offset: 0, index: 0)
-            compositeEncoder.setVertexBytes(
-                &starUniforms, length: MemoryLayout<StarUniforms>.stride, index: 1)
-            compositeEncoder.drawPrimitives(type: .point, vertexStart: 0, vertexCount: starCount)
-        }
-
-        // Nuage upsamplé « over » le ciel + les étoiles : restaurer le pipeline
-        // composite et la texture nuage après le draw des points.
-        compositeEncoder.setRenderPipelineState(compositePipeline)
         compositeEncoder.setFragmentTexture(cloudAccum, index: 0)
         compositeEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
-
-        // God rays composés **en dernier**, additivement par-dessus tout : ce
-        // sont des rayons diffusés dans l'air entre le nuage et l'œil, donc en
-        // surimpression. La source étant masquée par la couverture, un nuage
-        // épais juste devant le soleil ne produit aucun rayon à cet endroit.
         compositeEncoder.setRenderPipelineState(godRaysCompositePipeline)
         compositeEncoder.setFragmentTexture(godRayTarget, index: 0)
         compositeEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        if !metalFXActive {
+            encodeStars(into: compositeEncoder, cloud: cloudAccum, aspect: aspect, elapsed: elapsed)
+        }
         compositeEncoder.endEncoding()
 
-        commandBuffer.present(drawable)
-        commandBuffer.commit()
-        frameIndex &+= 1
+        #if canImport(MetalFX)
+        // Passes 3.5 + 4 — upscale spatial ×2 puis présentation + étoiles natives.
+        if metalFXActive, let scaler = spatialScaler,
+           let compositeTarget = compositeTarget, let upscaledTarget = upscaledTarget {
+            scaler.colorTexture = compositeTarget
+            scaler.outputTexture = upscaledTarget
+            scaler.encode(commandBuffer: commandBuffer)
+
+            guard let presentEncoder = commandBuffer.makeRenderCommandEncoder(
+                descriptor: drawableDescriptor) else {
+                return
+            }
+            presentEncoder.setRenderPipelineState(presentPipeline)
+            presentEncoder.setFragmentTexture(upscaledTarget, index: 0)
+            presentEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            encodeStars(into: presentEncoder, cloud: cloudAccum, aspect: aspect, elapsed: elapsed)
+            presentEncoder.endEncoding()
+        }
+        #endif
+    }
+
+    /// Étoiles : points additifs world-locked (cf. `Stars.metal`), dessinés en
+    /// fin de composition. L'occultation par le nuage se fait dans le shader
+    /// (transmittance `1 − α` échantillonnée dans `cloud`), ce qui permet de
+    /// les dessiner après le blend « over » — et donc en résolution native sur
+    /// le chemin MetalFX. Night-gated par `nightWeight`.
+    private func encodeStars(
+        into encoder: MTLRenderCommandEncoder,
+        cloud: MTLTexture,
+        aspect: Float,
+        elapsed: Float
+    ) {
+        guard starCount > 0, let starBuffer = starBuffer else { return }
+        var starUniforms = StarUniforms(
+            camRight: SIMD4(cameraRight.x, cameraRight.y, cameraRight.z, 0.0),
+            camUp: SIMD4(cameraUp.x, cameraUp.y, cameraUp.z, 0.0),
+            camForward: SIMD4(cameraForward.x, cameraForward.y, cameraForward.z, 0.0),
+            params: SIMD4(cameraTanHalfFov, aspect, nightWeight, elapsed))
+        encoder.setRenderPipelineState(starPipeline)
+        encoder.setVertexBuffer(starBuffer, offset: 0, index: 0)
+        encoder.setVertexBytes(
+            &starUniforms, length: MemoryLayout<StarUniforms>.stride, index: 1)
+        encoder.setFragmentTexture(cloud, index: 0)
+        encoder.drawPrimitives(type: .point, vertexStart: 0, vertexCount: starCount)
     }
 
     // MARK: - Coquilles
@@ -767,7 +915,69 @@ final class Renderer: NSObject, MTKViewDelegate {
         skyTarget = device.makeTexture(descriptor: descriptor)
         // Cible des god rays (demi-rés, HDR), même format que le ciel.
         godRayTarget = device.makeTexture(descriptor: descriptor)
+        #if canImport(MetalFX)
+        // L'entrée du scaler MetalFX suit la même résolution : forcer sa
+        // re-création (keyed sur la taille de sortie, qui peut ne pas changer).
+        spatialScaler = nil
+        #endif
     }
+
+    #if canImport(MetalFX)
+    /// (Re)crée le scaler spatial MetalFX et ses cibles : entrée = le composite
+    /// demi-rés, sortie = une texture à la taille du drawable, copiée ensuite
+    /// par `presentPipeline` (le drawable d'un `MTKView` est `framebufferOnly`,
+    /// le scaler ne peut pas l'écrire directement — et les étoiles se dessinent
+    /// par-dessus en natif de toute façon).
+    private func ensureScalerTargets(
+        fullWidth: Int, fullHeight: Int,
+        halfWidth: Int, halfHeight: Int
+    ) {
+        if scalerOutputWidth == fullWidth, scalerOutputHeight == fullHeight, spatialScaler != nil {
+            return
+        }
+        let descriptor = MTLFXSpatialScalerDescriptor()
+        descriptor.inputWidth = halfWidth
+        descriptor.inputHeight = halfHeight
+        descriptor.outputWidth = fullWidth
+        descriptor.outputHeight = fullHeight
+        descriptor.colorTextureFormat = drawableFormat
+        descriptor.outputTextureFormat = drawableFormat
+        // Le composite est déjà tonemappé (valeurs display-referred [0,1]).
+        descriptor.colorProcessingMode = .perceptual
+        guard let scaler = descriptor.makeSpatialScaler(device: device) else {
+            // Création refusée (format/dimensions) : repli bilinéaire définitif,
+            // pas de retry par frame.
+            scalerFailed = true
+            spatialScaler = nil
+            log.error("MetalFX : création du scaler refusée — repli bilinéaire")
+            return
+        }
+        scaler.inputContentWidth = halfWidth
+        scaler.inputContentHeight = halfHeight
+
+        // Usages exigés par le scaler, en plus de ceux de nos propres passes.
+        let inputDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: drawableFormat, width: halfWidth, height: halfHeight, mipmapped: false)
+        inputDescriptor.storageMode = .private
+        inputDescriptor.usage = MTLTextureUsage([.renderTarget]).union(scaler.colorTextureUsage)
+        let outputDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: drawableFormat, width: fullWidth, height: fullHeight, mipmapped: false)
+        outputDescriptor.storageMode = .private
+        outputDescriptor.usage = MTLTextureUsage([.shaderRead]).union(scaler.outputTextureUsage)
+        guard let input = device.makeTexture(descriptor: inputDescriptor),
+              let output = device.makeTexture(descriptor: outputDescriptor) else {
+            scalerFailed = true
+            spatialScaler = nil
+            log.error("MetalFX : allocation des cibles refusée — repli bilinéaire")
+            return
+        }
+        compositeTarget = input
+        upscaledTarget = output
+        spatialScaler = scaler
+        scalerOutputWidth = fullWidth
+        scalerOutputHeight = fullHeight
+    }
+    #endif
 
     // MARK: - Construction
 

@@ -101,6 +101,8 @@ un build Release (profilage perf en `-O`), passer
 - **Interrupteurs de passe** (profilage) : `AETHER_PERF_NOSKY` / `AETHER_PERF_NOSEA`
   / `AETHER_PERF_NOCLOUD` = `1` désactivent une passe pour isoler son coût, sans
   rebuild (relancer avec une autre combinaison de variables d'env).
+- **`AETHER_SCALE`** (device uniquement) : force le repli bilinéaire (`1`) ou une
+  échelle interne ≠ ½ du chemin MetalFX (cf. `docs/PIPELINE.md` « Upscale MetalFX »).
 
 ### Contrôle qualité statique
 
