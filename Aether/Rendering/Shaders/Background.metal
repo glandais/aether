@@ -171,9 +171,9 @@ static float3 computeSkyRadiance(float3 origin, float3 rayDir, float3 sunDir,
 // reflects Aether's own atmospheric sky (computeSkyRadiance) so the water stays
 // coherent with the background above the horizon.
 
-constant int SEA_NUM_STEPS = 6;
+constant int SEA_NUM_STEPS = 4;
 constant int SEA_ITER_GEOMETRY = 2;
-constant int SEA_ITER_FRAGMENT = 4;
+constant int SEA_ITER_FRAGMENT = 3;
 constant float2x2 SEA_OCTAVE_M = float2x2(1.6, 1.2, -1.2, 1.6);
 
 struct SeaParams {
