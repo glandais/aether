@@ -172,7 +172,7 @@ Format : JSON + PNG embarqué (autonome, partageable). Version actuelle : **v2**
 
 ## HUD de debug (DEBUG uniquement)
 
-Coin haut-gauche, police chasse fixe, fps + ms/frame. Non interactif. Absent des builds Release.
+Badge collé au bord gauche, centré verticalement. Capsule noire translucide, police chasse fixe, deux lignes : images par seconde (« ips ») et millisecondes par image (« ms »). Alimenté par `DebugHUD.shared`, posé par le `Renderer` (fenêtre glissante d'une seconde). Non interactif. Absent des builds Release.
 
 ---
 
