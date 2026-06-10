@@ -21,15 +21,6 @@ private enum AutoPlay {
     }
 }
 
-/// Panneau d'outil ouvert. Exclusif : un seul à la fois, pour ne pas encombrer
-/// le ciel ni déborder en paysage. `paint` réunit la peinture (sélection
-/// d'étage, visibilité, opacité, réglages de pinceau) ; il s'affiche de lui-même
-/// tant qu'on peint, sans bascule. `more` regroupe les réglages contextuels
-/// (ciel, lieu) sous un seul bouton, façon « More » HIG.
-fileprivate enum ToolPanel {
-    case paint, more
-}
-
 struct CanvasView: View {
     let context: SceneContext
     /// Harnais de capture : masque toute l'interface (y compris la pastille
@@ -143,6 +134,17 @@ struct CanvasView: View {
     private static let moonDiscBrightness: Float = 0.9
     /// Blanc froid du disque lunaire (la phase/teinte vient de la géométrie).
     private static let moonDiscTint = SIMD3<Float>(0.85, 0.88, 1.0)
+
+    /// Panneau d'outil ouvert. Exclusif : un seul à la fois, pour ne pas
+    /// encombrer le ciel ni déborder en paysage. `paint` réunit la peinture
+    /// (sélection d'étage, visibilité, opacité, réglages de pinceau) ; il
+    /// s'affiche de lui-même tant qu'on peint, sans bascule. `more` regroupe les
+    /// réglages contextuels (ciel, lieu) sous un seul bouton, façon « More » HIG.
+    /// `fileprivate` (non `private`) car traversé par la carte de panneau rendue
+    /// dans l'extension `Panneaux & gestes`.
+    fileprivate enum ToolPanel {
+        case paint, more
+    }
 
     /// Éclairage résolu pour l'instant courant : direction, couleur, ambiance.
     fileprivate struct ResolvedLight {
