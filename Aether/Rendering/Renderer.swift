@@ -493,7 +493,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             aspect: aspect,
             // Direction du soleil résolue par l'AstroService (étape 8).
             sunDirection: SIMD4(sunDirection.x, sunDirection.y, sunDirection.z, 0.0),
-            camera: SIMD4(cameraTanHalfFov, 0.0, 0.0, 0.0),
+            camera: SIMD4(cameraTanHalfFov, nightWeight, 0.0, 0.0),
             lightSun: SIMD4(sunColor.x, sunColor.y, sunColor.z, 0.0),
             lightAmbient: SIMD4(skyAmbient.x, skyAmbient.y, skyAmbient.z, 0.0),
             camRight: SIMD4(cameraRight.x, cameraRight.y, cameraRight.z, 0.0),

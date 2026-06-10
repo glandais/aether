@@ -106,16 +106,36 @@ static inline float henyeyGreenstein(float cosTheta, float g) {
 // Dual-lobe phase: a strong forward lobe (dusk "silver lining" when looking
 // toward the sun) blended with a softer backward lobe for ambient fill.
 // `gScale` softens the anisotropy for the higher multiple-scattering octaves.
-static inline float dualPhase(float cosTheta, float gScale) {
-    float forward = henyeyGreenstein(cosTheta, 0.82f * gScale);
+// `night` (0 day … 1 night) widens the forward lobe: the sun is a sharp source
+// (crisp silver lining), but the moon reads as a soft, near-uniform fill — a
+// narrow lobe under the near-black night ambient makes one cloud light up while
+// its neighbour stays dark (the radiance sits in the tone-map's linear range at
+// night, so the phase swing shows). Softening it keeps moonlit clouds coherent
+// without touching the daytime silver lining.
+static inline float dualPhase(float cosTheta, float gScale, float night) {
+    float forwardG = mix(0.82f, 0.40f, night);
+    float forward = henyeyGreenstein(cosTheta, forwardG * gScale);
     float backward = henyeyGreenstein(cosTheta, -0.18f * gScale);
-    return mix(backward, forward, 0.55f);
+    return mix(backward, forward, mix(0.55f, 0.42f, night));
 }
 
 // Schneider's "powder" approximation: darkens low-density regions facing the
 // light, recovering the dark edges of sunlit clouds.
 static inline float powder(float density) {
     return 1.0f - exp(-density * 3.0f);
+}
+
+// Tone-map the cloud's in-scattered radiance to display range. It is HDR (a
+// strong forward-scatter peak under a bright high sun, where `sunStrength`
+// reaches 9, pushes it well past 1), but the composite has no tone-map of its
+// own, so anything > 1 hard-clips to flat white. Same exponential operator the
+// sky pass uses (`1 - exp(-radiance·exposure)`, Background.metal) so cloud and
+// sky stay tonally consistent; it compresses the bright midday range
+// proportionally harder than the dim dusk/night range, which it leaves nearly
+// linear. `kCloudExposure` is the single tuning knob.
+constant float kCloudExposure = 1.0f;
+static inline float3 tonemapCloud(float3 c) {
+    return 1.0f - exp(-c * kCloudExposure);
 }
 
 // MARK: - Shell geometry (ported from Sky.metal:511-535)
@@ -254,6 +274,9 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
     float3 skyAmbient = u.lightAmbient.xyz;
     const int kScatterOctaves = 3;
     float cosTheta = dot(rd, sunDir);
+    // Night factor (0 day … 1 night), packed in camera.y by the host: softens the
+    // phase lobe so moonlight reads as a uniform fill, not a sharp silver lining.
+    float night = u.camera.y;
 
     // Transmittance and scattered radiance are SHARED across the concentric
     // shells (docs/SHELLS.md §6): a thin cirrus above doesn't reset the cumulus
@@ -346,7 +369,7 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
             float gScale = 1.0f;
             for (int o = 0; o < kScatterOctaves; ++o) {
                 float beer = exp(-opticalDepth * sigma * attenuation);
-                sunLight += weight * beer * dualPhase(cosTheta, gScale);
+                sunLight += weight * beer * dualPhase(cosTheta, gScale, night);
                 attenuation *= 0.5f;
                 weight *= 0.55f;
                 gScale *= 0.5f;
@@ -369,5 +392,7 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
     }
 
     float alpha = 1.0f - transmittance;
-    return float4(scattered, alpha);
+    // Tone-map the HDR in-scatter to display range so it can't hard-clip to flat
+    // white; same exponential operator as the sky pass for tonal consistency.
+    return float4(tonemapCloud(scattered), alpha);
 }

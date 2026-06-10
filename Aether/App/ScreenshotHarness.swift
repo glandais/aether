@@ -62,7 +62,18 @@ enum ScreenshotHarness {
             tanHalfFov: Float(tan(context.scene.fieldOfView / 2)),
             aspect: 1320.0 / 2868.0)
 
-        let layers = makeLayers(style: cloudStr, camera: camera)
+        // Applique les défauts météo de la scène (`CloudParameters`) aux calques
+        // injectés, **exactement** comme `CanvasModel.applySceneDefaults` le fait
+        // pour un calque peint à la main : sans ça les nuages debug seraient plus
+        // pleins/opaques (coverageBias 0, opacity 1) que ceux qu'on peint vraiment.
+        let params = context.cloudParameters
+        let layers = makeLayers(style: cloudStr, camera: camera).map { layer in
+            CloudLayer(
+                genus: layer.genus, strokes: layer.strokes,
+                coverageBias: params.coverageBias,
+                opacity: min(max(params.densityScale, 0), 1),
+                isVisible: layer.isVisible)
+        }
 
         let restored = RestoredCanvasState(
             layers: layers, viewYaw: 0, viewPitch: 0,
