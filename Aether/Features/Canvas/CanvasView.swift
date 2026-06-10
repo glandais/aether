@@ -540,6 +540,28 @@ struct CanvasView: View {
 
     // MARK: - Vues
 
+    #if DEBUG
+    /// Badge FPS de profilage (DEBUG) — collé à gauche, centré verticalement.
+    /// Alimenté par `DebugHUD.shared` (posé par le Renderer). Ne capture pas les
+    /// gestes.
+    private var debugFPSBadge: some View {
+        let hud = DebugHUD.shared
+        let ms = hud.fps > 0 ? 1000.0 / hud.fps : 0
+        return VStack(alignment: .leading, spacing: 2) {
+            Text("\(hud.fps, format: .number.precision(.fractionLength(0))) ips")
+                .font(.system(.title3, design: .monospaced).bold())
+            Text("\(ms, format: .number.precision(.fractionLength(1))) ms")
+                .font(.system(.caption, design: .monospaced))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
+        .padding(.leading, 6)
+        .allowsHitTesting(false)
+    }
+    #endif
+
     @ViewBuilder
     private func canvas(light: ResolvedLight) -> some View {
         let basis = cameraPose.basis
@@ -578,6 +600,9 @@ struct CanvasView: View {
                     .simultaneousGesture(zoomGesture)
             }
         }
+        #if DEBUG
+        .overlay(alignment: .leading) { debugFPSBadge }
+        #endif
 
         if let aspect = context.displayAspect {
             metalView.aspectRatio(aspect, contentMode: .fit)
@@ -1069,7 +1094,7 @@ extension CanvasView {
     /// rétrécit le FOV (zoom avant). Le nuage étant à position réelle en monde,
     /// le zoom ne l'efface plus : on zoome dans/hors d'un nuage fixe. Clampé
     /// entre min/max FOV.
-    private var zoomGesture: some Gesture {
+    fileprivate var zoomGesture: some Gesture {
         MagnifyGesture()
             .onChanged { value in
                 guard model.isRotating else { return }

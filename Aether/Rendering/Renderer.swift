@@ -65,7 +65,7 @@ private struct CloudUniforms {
 /// `Cloud.metal`.
 private struct CloudTemporal {
     var activeIndex: UInt32
-    var cameraMoving: UInt32  // 1 pendant la rotation/zoom du regard
+    var stride: UInt32  // 2 au repos (¼ des pixels, cellule active), 1 en mouvement
 }
 
 /// Uniforms du shader de ciel atmosphérique. Disposition mémoire **identique**
@@ -132,7 +132,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let device: MTLDevice
     private let commandQueue: MTLCommandQueue
     private let skyPipeline: MTLRenderPipelineState
-    private let cloudPipeline: MTLRenderPipelineState
+    private let cloudPipeline: MTLComputePipelineState
     private let compositePipeline: MTLRenderPipelineState
     private let starPipeline: MTLRenderPipelineState
     // God rays : passe demi-rés (rayons crépusculaires) + composition additive.
@@ -153,8 +153,12 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var fpsWindowStart = CACurrentMediaTime()
     private var fpsFrameCount = 0
 
-    // Cibles demi-résolution ping-pong pour le raymarch amorti (étape 7).
-    private var cloudTargets: [MTLTexture] = []
+    // Cible demi-résolution **persistante** du raymarch nuage amorti : le compute
+    // kernel y réécrit la cellule active (¼ des pixels au repos), le reste garde
+    // la valeur des frames précédentes. `cloudAccumDirty` force un refresh complet
+    // après (ré)allocation pour ne pas composer du bruit non initialisé.
+    private var cloudAccum: MTLTexture?
+    private var cloudAccumDirty = true
     private var cloudTargetWidth = 0
     private var cloudTargetHeight = 0
     // Ciel + mer rendus hors écran à demi-résolution (HDR), upsamplés au composite.
@@ -209,6 +213,14 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var moonGlint = SIMD3<Float>(0, 0, 0)
     private var nightWeight: Float = 0
 
+    #if DEBUG
+    // Interrupteurs de passe (profilage perf) : désactivent une passe pour isoler
+    // son coût en relançant avec la variable d'env, sans rebuild.
+    private static let perfNoSky = ProcessInfo.processInfo.environment["AETHER_PERF_NOSKY"] == "1"
+    private static let perfNoSea = ProcessInfo.processInfo.environment["AETHER_PERF_NOSEA"] == "1"
+    private static let perfNoCloud = ProcessInfo.processInfo.environment["AETHER_PERF_NOCLOUD"] == "1"
+    #endif
+
     // Étoiles (BSC5) dessinées dans le ciel — purs points additifs, sans
     // éclairage. Les directions monde sont résolues par la Feature pour le
     // lieu/heure (cf. `StarCatalog`) et téléversées dans `starBuffer` ; on ne
@@ -262,8 +274,7 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         guard let backgroundVertex = library.makeFunction(name: "background_vertex"),
               let skyFragment = library.makeFunction(name: "sky_background_fragment"),
-              let cloudVertex = library.makeFunction(name: "cloud_vertex"),
-              let cloudFragment = library.makeFunction(name: "cloud_fragment"),
+              let cloudKernel = library.makeFunction(name: "cloud_kernel"),
               let compositeVertex = library.makeFunction(name: "composite_vertex"),
               let compositeFragment = library.makeFunction(name: "composite_fragment"),
               let starVertex = library.makeFunction(name: "star_vertex"),
@@ -283,11 +294,12 @@ final class Renderer: NSObject, MTKViewDelegate {
             skyPipeline = try Renderer.makePipeline(
                 device: device, vertex: backgroundVertex, fragment: skyFragment,
                 pixelFormat: Renderer.cloudColorFormat, blend: .none)
-            // Le nuage est rendu hors écran (demi-rés, HDR), sans blending :
-            // la composition « over » a lieu au passage composite.
-            cloudPipeline = try Renderer.makePipeline(
-                device: device, vertex: cloudVertex, fragment: cloudFragment,
-                pixelFormat: Renderer.cloudColorFormat, blend: .none)
+            // Le nuage est raymarché par un **compute kernel** dans une cible
+            // persistante (demi-rés, HDR) : l'amortissement temporel écrit la
+            // cellule active de façon compacte (¼ des pixels au repos), sans la
+            // divergence SIMD d'un fragment plein écran qui sort tôt sur ¾ des
+            // lignes. La composition « over » a lieu au passage composite.
+            cloudPipeline = try device.makeComputePipelineState(function: cloudKernel)
             compositePipeline = try Renderer.makePipeline(
                 device: device, vertex: compositeVertex, fragment: compositeFragment,
                 pixelFormat: format, blend: .premultiplied)
@@ -439,7 +451,12 @@ final class Renderer: NSObject, MTKViewDelegate {
         let now = CACurrentMediaTime()
         let span = now - fpsWindowStart
         if span >= 1.0 {
-            log.info("FPS \(Double(self.fpsFrameCount) / span, format: .fixed(precision: 1))")
+            let fps = Double(self.fpsFrameCount) / span
+            log.info("FPS \(fps, format: .fixed(precision: 1))")
+            #if DEBUG
+            // `draw(in:)` est appelé sur le main thread (CADisplayLink du MTKView).
+            MainActor.assumeIsolated { DebugHUD.shared.fps = fps }
+            #endif
             fpsFrameCount = 0
             fpsWindowStart = now
         }
@@ -451,7 +468,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         let halfHeight = max(fullHeight / 2, 1)
         ensureCloudTargets(width: halfWidth, height: halfHeight)
 
-        guard cloudTargets.count == 2,
+        guard let cloudAccum = cloudAccum,
               let skyTarget = skyTarget,
               let godRayTarget = godRayTarget,
               let descriptor = view.currentRenderPassDescriptor,
@@ -459,9 +476,6 @@ final class Renderer: NSObject, MTKViewDelegate {
               let commandBuffer = commandQueue.makeCommandBuffer() else {
             return
         }
-
-        let writeTarget = cloudTargets[frameIndex % 2]
-        let historyTarget = cloudTargets[(frameIndex + 1) % 2]
 
         let aspect = Float(fullWidth) / Float(fullHeight)
         let elapsed = Float(CACurrentMediaTime() - startTime)
@@ -502,32 +516,55 @@ final class Renderer: NSObject, MTKViewDelegate {
             shells: shells.quad,
             layerCount: UInt32(shells.count)
         )
+        // Mouvement (ou première frame après réallocation) → refresh complet :
+        // stride 1 sur tous les pixels. Au repos → stride 2, cellule active seule.
+        let fullRefresh = cameraMoving || cloudAccumDirty
+        cloudAccumDirty = false
         var temporal = CloudTemporal(
-            activeIndex: Renderer.activeOrder[frameIndex % 4],
-            cameraMoving: cameraMoving ? 1 : 0)
+            activeIndex: fullRefresh ? 0 : Renderer.activeOrder[frameIndex % 4],
+            stride: fullRefresh ? 1 : 2)
 
-        // Passe 1 — nuage raymarché hors écran, à demi-résolution, amorti dans
-        // le temps (1 cellule 2×2 sur 4 par frame, le reste vient de l'historique).
-        let cloudPass = MTLRenderPassDescriptor()
-        cloudPass.colorAttachments[0].texture = writeTarget
-        cloudPass.colorAttachments[0].loadAction = .dontCare
-        cloudPass.colorAttachments[0].storeAction = .store
-        guard let cloudEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: cloudPass) else {
-            return
+        // Passe 1 — nuage raymarché par compute dans la cible persistante : au
+        // repos seule la cellule active (¼ des pixels) est réécrite, de façon
+        // **compacte** (tous les threads marchent → pas de divergence SIMD,
+        // contrairement à un fragment plein écran qui sortait tôt sur ¾ des lignes).
+        var drawCloud = true
+        #if DEBUG
+        drawCloud = !Renderer.perfNoCloud
+        #endif
+        if drawCloud, let cloudEncoder = commandBuffer.makeComputeCommandEncoder() {
+            cloudEncoder.setComputePipelineState(cloudPipeline)
+            cloudEncoder.setTexture(cloudAccum, index: 0)
+            cloudEncoder.setBytes(&uniforms, length: MemoryLayout<CloudUniforms>.stride, index: 0)
+            cloudEncoder.setBytes(&temporal, length: MemoryLayout<CloudTemporal>.stride, index: 1)
+            cloudEncoder.setTexture(noiseTexture, index: 1)
+            // Atlas de couverture directionnelle (modèle multi-coquilles) :
+            // échantillonné en `filter::linear` (R8Unorm filtrable).
+            cloudEncoder.setTexture(coverageBaker.atlas, index: 3)
+            cloudEncoder.setSamplerState(sampler, index: 0)
+            let stride = Int(temporal.stride)
+            let gridW = (halfWidth + stride - 1) / stride
+            let gridH = (halfHeight + stride - 1) / stride
+            let tg = MTLSize(width: 8, height: 8, depth: 1)
+            // `dispatchThreadgroups` (portable) + garde de bornes dans le kernel,
+            // plutôt que `dispatchThreads` (threadgroups non-uniformes).
+            let groups = MTLSize(
+                width: (gridW + tg.width - 1) / tg.width,
+                height: (gridH + tg.height - 1) / tg.height,
+                depth: 1)
+            cloudEncoder.dispatchThreadgroups(groups, threadsPerThreadgroup: tg)
+            cloudEncoder.endEncoding()
         }
-        cloudEncoder.setRenderPipelineState(cloudPipeline)
-        cloudEncoder.setFragmentBytes(&uniforms, length: MemoryLayout<CloudUniforms>.stride, index: 0)
-        cloudEncoder.setFragmentBytes(&temporal, length: MemoryLayout<CloudTemporal>.stride, index: 1)
-        cloudEncoder.setFragmentTexture(noiseTexture, index: 1)
-        cloudEncoder.setFragmentTexture(historyTarget, index: 2)
-        // Atlas de couverture directionnelle (modèle multi-coquilles) :
-        // échantillonné en `filter::linear` (R8Unorm filtrable).
-        cloudEncoder.setFragmentTexture(coverageBaker.atlas, index: 3)
-        cloudEncoder.setFragmentSamplerState(sampler, index: 0)
-        cloudEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
-        cloudEncoder.endEncoding()
 
         // Passe 2 — ciel atmosphérique + mer raymarchée, hors écran à demi-rés.
+        // Interrupteurs perf (DEBUG) : `skyDebugFlag` > 0,5 fait sauter le
+        // raymarch atmosphérique côté shader ; `seaEnabledFlag` coupe la mer.
+        var skyDebugFlag: Float = 0
+        var seaEnabledFlag: Float = sea.enabled ? 1.0 : 0.0
+        #if DEBUG
+        if Renderer.perfNoSky { skyDebugFlag = 1 }
+        if Renderer.perfNoSea { seaEnabledFlag = 0 }
+        #endif
         var skyUniforms = SkyUniforms(
             sunDirection: SIMD4(skySunDirection.x, skySunDirection.y, skySunDirection.z, 0.0),
             rayleighScattering: SIMD4(
@@ -539,11 +576,11 @@ final class Renderer: NSObject, MTKViewDelegate {
             radii: SIMD4(
                 atmosphere.planetRadius, atmosphere.atmosphereRadius,
                 atmosphere.eyeHeight, Renderer.skyExposure),
-            camera: SIMD4(cameraTanHalfFov, aspect, skyGroundLight, 0.0),
+            camera: SIMD4(cameraTanHalfFov, aspect, skyGroundLight, skyDebugFlag),
             camRight: SIMD4(cameraRight.x, cameraRight.y, cameraRight.z, 0.0),
             camUp: SIMD4(cameraUp.x, cameraUp.y, cameraUp.z, 0.0),
             camForward: SIMD4(cameraForward.x, cameraForward.y, cameraForward.z, 0.0),
-            sea0: SIMD4(sea.enabled ? 1.0 : 0.0, sea.level, sea.height, sea.choppy),
+            sea0: SIMD4(seaEnabledFlag, sea.level, sea.height, sea.choppy),
             sea1: SIMD4(sea.frequency, sea.speed, elapsed, 0.0),
             seaBase: SIMD4(sea.baseColor.x, sea.baseColor.y, sea.baseColor.z, 0.0),
             seaWater: SIMD4(sea.waterColor.x, sea.waterColor.y, sea.waterColor.z, 0.0),
@@ -596,7 +633,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         godRayEncoder.setRenderPipelineState(godRaysPipeline)
         godRayEncoder.setFragmentBytes(
             &godRayUniforms, length: MemoryLayout<GodRayUniforms>.stride, index: 0)
-        godRayEncoder.setFragmentTexture(writeTarget, index: 0)
+        godRayEncoder.setFragmentTexture(cloudAccum, index: 0)
         godRayEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         godRayEncoder.endEncoding()
 
@@ -628,7 +665,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         // Nuage upsamplé « over » le ciel + les étoiles : restaurer le pipeline
         // composite et la texture nuage après le draw des points.
         compositeEncoder.setRenderPipelineState(compositePipeline)
-        compositeEncoder.setFragmentTexture(writeTarget, index: 0)
+        compositeEncoder.setFragmentTexture(cloudAccum, index: 0)
         compositeEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
 
         // God rays composés **en dernier**, additivement par-dessus tout : ce
@@ -673,48 +710,27 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     // MARK: - Cibles demi-résolution
 
-    /// (Re)crée les deux cibles ping-pong à la demi-résolution courante.
+    /// (Re)crée les cibles hors écran à la demi-résolution courante.
     private func ensureCloudTargets(width: Int, height: Int) {
-        if cloudTargetWidth == width, cloudTargetHeight == height, cloudTargets.count == 2 {
+        if cloudTargetWidth == width, cloudTargetHeight == height, cloudAccum != nil {
             return
         }
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: Renderer.cloudColorFormat, width: width, height: height, mipmapped: false)
-        descriptor.usage = [.renderTarget, .shaderRead]
         descriptor.storageMode = .private
 
-        var targets: [MTLTexture] = []
-        for _ in 0..<2 {
-            guard let target = device.makeTexture(descriptor: descriptor) else { return }
-            targets.append(target)
-        }
-        cloudTargets = targets
+        // Cible nuage persistante : écrite par le compute kernel, lue au composite.
+        descriptor.usage = [.shaderRead, .shaderWrite]
+        cloudAccum = device.makeTexture(descriptor: descriptor)
+        cloudAccumDirty = true  // refresh complet à la première frame (pas de bruit)
         cloudTargetWidth = width
         cloudTargetHeight = height
-        // Vider l'historique : sinon les pixels non actifs lisent du bruit
-        // pendant les premières frames (jusqu'au remplissage du cycle 2×2).
-        for target in targets {
-            clear(target)
-        }
 
-        // Cible du ciel+mer (demi-rés, HDR), recréée avec les cibles nuage.
+        // Cible du ciel+mer (demi-rés, HDR), recréée avec la cible nuage.
         descriptor.usage = [.renderTarget, .shaderRead]
         skyTarget = device.makeTexture(descriptor: descriptor)
         // Cible des god rays (demi-rés, HDR), même format que le ciel.
         godRayTarget = device.makeTexture(descriptor: descriptor)
-    }
-
-    private func clear(_ texture: MTLTexture) {
-        let pass = MTLRenderPassDescriptor()
-        pass.colorAttachments[0].texture = texture
-        pass.colorAttachments[0].loadAction = .clear
-        pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0)
-        pass.colorAttachments[0].storeAction = .store
-        if let commandBuffer = commandQueue.makeCommandBuffer(),
-           let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) {
-            encoder.endEncoding()
-            commandBuffer.commit()
-        }
     }
 
     // MARK: - Construction

@@ -64,16 +64,16 @@ struct CloudUniforms {
     uint   layerCount;
 };
 
-// Temporal amortization (step 7): each frame raymarches only the half-res
-// pixels whose 2×2 cell index matches `activeIndex`; the rest reuse history.
+// Temporal amortization: the cloud is raymarched by a COMPUTE kernel into a
+// persistent half-res target. Each thread writes a scattered destination pixel
+// `gid·stride + offset`, so at rest (stride 2) only the active 2×2 cell is
+// touched — but compactly, every thread doing real work (no SIMD divergence,
+// unlike a full-screen fragment that early-outs 3/4 of its lanes). While the
+// gaze moves the ray under each pixel changes, so stride drops to 1 and the
+// whole target is refreshed.
 struct CloudTemporal {
-    uint activeIndex;       // 0…3, cycles over frames
-    uint cameraMoving;      // 1 while the gaze rotates/zooms → raymarch all pixels
-};
-
-struct CloudInOut {
-    float4 position [[position]];
-    float2 ndc;             // clip-space xy, interpolated across the screen
+    uint activeIndex;       // 0…3, cycles over frames → 2×2 cell offset
+    uint stride;            // 2 at rest (quarter of the pixels), 1 while moving
 };
 
 // Planet geometry (realtime_clouds reference, Sky.metal:295). The camera rests on
@@ -213,45 +213,20 @@ static inline float shapeDensity(float cov, float g, float cloudType, float3 noi
     return saturate(density) * g;
 }
 
-vertex CloudInOut cloud_vertex(uint vertexID [[vertex_id]]) {
-    const float2 positions[3] = {
-        float2(-1.0, -1.0),
-        float2( 3.0, -1.0),
-        float2(-1.0,  3.0)
-    };
-    const float2 p = positions[vertexID];
-    CloudInOut out;
-    out.position = float4(p, 0.0, 1.0);
-    out.ndc = p;
-    return out;
-}
-
-// Outputs PREMULTIPLIED color + coverage alpha, composited over the landscape
-// with (one, oneMinusSourceAlpha) blending.
-fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
-                               constant CloudUniforms &u [[buffer(0)]],
-                               constant CloudTemporal &temporal [[buffer(1)]],
-                               texture3d<float> noise [[texture(1)]],
-                               texture2d_array<float> coverage [[texture(3)]],
-                               sampler coverageSampler [[sampler(0)]],
-                               texture2d<float, access::read> history [[texture(2)]]) {
-    // Temporal amortization: only the active 2×2 cell is raymarched this frame;
-    // the others reuse the previous frame — valid only while the camera is still
-    // (same pixel = same ray). While the gaze moves the ray under each pixel
-    // changes, so reusing history would smear; raymarch all.
-    uint2 px = uint2(in.position.xy);
-    uint cellIndex = (px.y & 1) * 2 + (px.x & 1);
-    if (temporal.cameraMoving == 0 && cellIndex != temporal.activeIndex) {
-        return history.read(px);
-    }
-
+// Raymarches the painted multi-shell clouds along the view ray for a given
+// clip-space `ndc` (+Y up). Returns PREMULTIPLIED colour + coverage alpha.
+// Shared by the compute kernel; factored out so the ray math has one home.
+static float4 marchClouds(float2 ndc,
+                          constant CloudUniforms &u,
+                          texture3d<float> noise,
+                          texture2d_array<float> coverage,
+                          sampler coverageSampler) {
     if (u.layerCount == 0u) {
         return float4(0.0f);  // no painted shell this frame → empty sky
     }
 
     // Reconstruct the world-space view ray from the camera→world basis (mirror of
-    // the sky pass). `in.ndc` is already clip-space (+Y up) from `cloud_vertex`.
-    float2 ndc = in.ndc;
+    // the sky pass).
     float3 rd = normalize(
         ndc.x * u.camera.x * u.aspect * u.camRight.xyz +
         ndc.y * u.camera.x * u.camUp.xyz +
@@ -395,4 +370,29 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
     // Tone-map the HDR in-scatter to display range so it can't hard-clip to flat
     // white; same exponential operator as the sky pass for tonal consistency.
     return float4(tonemapCloud(scattered), alpha);
+}
+
+// Cloud raymarch as a compute kernel writing a PERSISTENT half-res target. Each
+// thread owns one destination pixel `gid·stride + offset`; at rest stride = 2 so
+// only the active 2×2 cell is rewritten (the rest of the target keeps its prior
+// value — the temporal reuse), every launched thread doing a full march so there
+// is no divergence waste. While moving stride = 1 and the whole target refreshes.
+kernel void cloud_kernel(texture2d<float, access::write> dst [[texture(0)]],
+                         constant CloudUniforms &u [[buffer(0)]],
+                         constant CloudTemporal &temporal [[buffer(1)]],
+                         texture3d<float> noise [[texture(1)]],
+                         texture2d_array<float> coverage [[texture(3)]],
+                         sampler coverageSampler [[sampler(0)]],
+                         uint2 gid [[thread_position_in_grid]]) {
+    uint2 offset = uint2(temporal.activeIndex & 1u, (temporal.activeIndex >> 1) & 1u);
+    uint2 full = gid * temporal.stride + offset;
+    uint2 dims = uint2(uint(u.resolution.x), uint(u.resolution.y));
+    if (any(full >= dims)) {
+        return;
+    }
+    // Pixel centre → clip space (+Y up), matching the former fullscreen-triangle
+    // mapping so the composite samples the same image.
+    float2 uv = (float2(full) + 0.5f) / float2(dims);
+    float2 ndc = float2(uv.x * 2.0f - 1.0f, 1.0f - uv.y * 2.0f);
+    dst.write(marchClouds(ndc, u, noise, coverage, coverageSampler), full);
 }

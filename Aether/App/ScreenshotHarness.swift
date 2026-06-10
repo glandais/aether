@@ -91,6 +91,19 @@ enum ScreenshotHarness {
         switch style {
         case "none":
             return []
+        case "perf":  // Pire cas 3 étages (couverture large) pour le profilage perf device.
+            return [
+                CloudLayer(genus: .cumulus, strokes:
+                    cumulus(centerX: 0.20, centerY: 0.44, scale: 0.9, camera: camera)
+                    + cumulus(centerX: 0.50, centerY: 0.42, scale: 1.0, camera: camera)
+                    + cumulus(centerX: 0.80, centerY: 0.45, scale: 0.9, camera: camera)),
+                CloudLayer(genus: .altocumulus, strokes:
+                    band(centerY: 0.30, camera: camera)
+                    + cumulus(centerX: 0.35, centerY: 0.26, scale: 0.5, camera: camera)
+                    + cumulus(centerX: 0.68, centerY: 0.25, scale: 0.5, camera: camera)),
+                CloudLayer(genus: .cirrus,
+                    strokes: band(centerY: 0.14, camera: camera) + band(centerY: 0.08, camera: camera))
+            ]
         case "scattered":
             strokes =
                 cumulus(centerX: 0.30, centerY: 0.36, scale: 0.6, camera: camera)

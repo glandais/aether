@@ -430,8 +430,15 @@ fragment float4 sky_background_fragment(BackgroundInOut in [[stage_in]],
     const float exposure = sky.radii.w;
     float3 skyColor = float3(0.0);
     if (rayDir.y > -0.05) {
-        const float3 radiance = computeSkyRadiance(origin, rayDir, sunDir, sky);
-        skyColor = 1.0 - exp(-radiance * exposure);
+        // Perf toggle (camera.w > 0.5, DEBUG): skip the per-pixel atmospheric
+        // raymarch and substitute a flat gradient, to isolate its cost.
+        if (sky.camera.w > 0.5) {
+            skyColor = mix(float3(0.18, 0.34, 0.62), float3(0.55, 0.70, 0.92),
+                           saturate(rayDir.y));
+        } else {
+            const float3 radiance = computeSkyRadiance(origin, rayDir, sunDir, sky);
+            skyColor = 1.0 - exp(-radiance * exposure);
+        }
     }
 
     const float3 discMoonDir = normalize(sky.moonDirection.xyz);
