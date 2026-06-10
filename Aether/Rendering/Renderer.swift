@@ -132,6 +132,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let device: MTLDevice
     private let commandQueue: MTLCommandQueue
     private let skyPipeline: MTLRenderPipelineState
+    private let skyRadiancePipeline: MTLComputePipelineState
     private let cloudPipeline: MTLComputePipelineState
     private let compositePipeline: MTLRenderPipelineState
     private let starPipeline: MTLRenderPipelineState
@@ -161,6 +162,9 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var cloudAccumDirty = true
     private var cloudTargetWidth = 0
     private var cloudTargetHeight = 0
+    // Radiance du ciel amortie (même schéma que `cloudAccum`) : écrite par le
+    // compute kernel, lue par la passe ciel+mer. La mer, animée, n'est pas amortie.
+    private var skyAccum: MTLTexture?
     // Ciel + mer rendus hors écran à demi-résolution (HDR), upsamplés au composite.
     private var skyTarget: MTLTexture?
     // God rays (rayons crépusculaires) rendus hors écran à demi-rés, composés
@@ -275,6 +279,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         guard let backgroundVertex = library.makeFunction(name: "background_vertex"),
               let skyFragment = library.makeFunction(name: "sky_background_fragment"),
               let cloudKernel = library.makeFunction(name: "cloud_kernel"),
+              let skyRadianceKernel = library.makeFunction(name: "sky_radiance_kernel"),
               let compositeVertex = library.makeFunction(name: "composite_vertex"),
               let compositeFragment = library.makeFunction(name: "composite_fragment"),
               let starVertex = library.makeFunction(name: "star_vertex"),
@@ -294,6 +299,9 @@ final class Renderer: NSObject, MTKViewDelegate {
             skyPipeline = try Renderer.makePipeline(
                 device: device, vertex: backgroundVertex, fragment: skyFragment,
                 pixelFormat: Renderer.cloudColorFormat, blend: .none)
+            // Radiance atmosphérique du ciel : compute amorti (comme le nuage),
+            // écrit `skyAccum` lu par la passe ciel+mer. La mer reste plein régime.
+            skyRadiancePipeline = try device.makeComputePipelineState(function: skyRadianceKernel)
             // Le nuage est raymarché par un **compute kernel** dans une cible
             // persistante (demi-rés, HDR) : l'amortissement temporel écrit la
             // cellule active de façon compacte (¼ des pixels au repos), sans la
@@ -469,6 +477,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         ensureCloudTargets(width: halfWidth, height: halfHeight)
 
         guard let cloudAccum = cloudAccum,
+              let skyAccum = skyAccum,
               let skyTarget = skyTarget,
               let godRayTarget = godRayTarget,
               let descriptor = view.currentRenderPassDescriptor,
@@ -588,9 +597,33 @@ final class Renderer: NSObject, MTKViewDelegate {
             moonGlint: SIMD4(moonGlint.x, moonGlint.y, moonGlint.z, 0.0),
             skyZenith: SIMD4(skyZenithRadiance.x, skyZenithRadiance.y, skyZenithRadiance.z, 0.0),
             skyHorizon: SIMD4(skyHorizonRadiance.x, skyHorizonRadiance.y, skyHorizonRadiance.z, 0.0),
-            discParams: SIMD4(Renderer.sunAngularRadius, Renderer.moonAngularRadius, 0.0, 0.0),
+            // zw : résolution demi-rés, lue par `sky_radiance_kernel` (positions).
+            discParams: SIMD4(
+                Renderer.sunAngularRadius, Renderer.moonAngularRadius,
+                Float(halfWidth), Float(halfHeight)),
             sunDiscColor: SIMD4(sunDiscColor.x, sunDiscColor.y, sunDiscColor.z, 0.0),
             moonDiscColor: SIMD4(moonDiscColor.x, moonDiscColor.y, moonDiscColor.z, 0.0))
+
+        // Passe 1.5 — radiance atmosphérique du ciel, raymarchée par compute dans
+        // `skyAccum`, **amortie** comme le nuage (¼ des pixels au repos). La passe
+        // ciel+mer qui suit la lit au lieu de raymarcher (la mer, animée, reste
+        // plein régime). Même `temporal` (stride/cellule) que le nuage.
+        if let skyKernelEncoder = commandBuffer.makeComputeCommandEncoder() {
+            skyKernelEncoder.setComputePipelineState(skyRadiancePipeline)
+            skyKernelEncoder.setTexture(skyAccum, index: 0)
+            skyKernelEncoder.setBytes(&skyUniforms, length: MemoryLayout<SkyUniforms>.stride, index: 0)
+            skyKernelEncoder.setBytes(&temporal, length: MemoryLayout<CloudTemporal>.stride, index: 1)
+            let stride = Int(temporal.stride)
+            let gridW = (halfWidth + stride - 1) / stride
+            let gridH = (halfHeight + stride - 1) / stride
+            let tg = MTLSize(width: 8, height: 8, depth: 1)
+            let groups = MTLSize(
+                width: (gridW + tg.width - 1) / tg.width,
+                height: (gridH + tg.height - 1) / tg.height,
+                depth: 1)
+            skyKernelEncoder.dispatchThreadgroups(groups, threadsPerThreadgroup: tg)
+            skyKernelEncoder.endEncoding()
+        }
 
         let skyPass = MTLRenderPassDescriptor()
         skyPass.colorAttachments[0].texture = skyTarget
@@ -602,6 +635,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         skyEncoder.setRenderPipelineState(skyPipeline)
         skyEncoder.setFragmentBytes(&skyUniforms, length: MemoryLayout<SkyUniforms>.stride, index: 0)
         skyEncoder.setFragmentTexture(landscapeTexture, index: 0)
+        skyEncoder.setFragmentTexture(skyAccum, index: 1)
         skyEncoder.setFragmentSamplerState(sampler, index: 0)
         skyEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         skyEncoder.endEncoding()
@@ -719,9 +753,11 @@ final class Renderer: NSObject, MTKViewDelegate {
             pixelFormat: Renderer.cloudColorFormat, width: width, height: height, mipmapped: false)
         descriptor.storageMode = .private
 
-        // Cible nuage persistante : écrite par le compute kernel, lue au composite.
+        // Cibles persistantes (nuage + radiance ciel) : écrites par compute,
+        // lues par les passes suivantes.
         descriptor.usage = [.shaderRead, .shaderWrite]
         cloudAccum = device.makeTexture(descriptor: descriptor)
+        skyAccum = device.makeTexture(descriptor: descriptor)
         cloudAccumDirty = true  // refresh complet à la première frame (pas de bruit)
         cloudTargetWidth = width
         cloudTargetHeight = height

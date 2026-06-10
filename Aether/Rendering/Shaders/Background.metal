@@ -401,9 +401,58 @@ static float3 moonDisc(float3 rayDir, float3 sunDir, float3 moonDir,
     return sky.moonDiscColor.xyz * (lit * mott + earthshine) * edge;
 }
 
+// Temporal amortization for the sky (mirrors Cloud.metal's CloudTemporal): the
+// per-pixel atmospheric raymarch is expensive but the sky changes slowly, so the
+// `sky_radiance_kernel` rewrites only the active 2×2 cell at rest (stride 2),
+// compactly. The animated sea is NOT amortized — it stays in the full-rate
+// fragment below, which just reads this cache for the sky portion.
+struct SkyTemporal {
+    uint activeIndex;   // 0…3, cycles over frames → 2×2 cell offset
+    uint stride;        // 2 at rest (quarter of the pixels), 1 while moving
+};
+
+// Computes the tonemapped atmospheric sky colour into a persistent half-res
+// target at scattered positions `gid·stride + offset`. Resolution is packed in
+// `discParams.zw` by the host. Below-horizon pixels write black (unused: the sea
+// covers them).
+kernel void sky_radiance_kernel(texture2d<float, access::write> dst [[texture(0)]],
+                                constant SkyUniforms &sky [[buffer(0)]],
+                                constant SkyTemporal &temporal [[buffer(1)]],
+                                uint2 gid [[thread_position_in_grid]]) {
+    uint2 offset = uint2(temporal.activeIndex & 1u, (temporal.activeIndex >> 1) & 1u);
+    uint2 full = gid * temporal.stride + offset;
+    uint2 dims = uint2(uint(sky.discParams.z), uint(sky.discParams.w));
+    if (any(full >= dims)) {
+        return;
+    }
+    float2 uv = (float2(full) + 0.5) / float2(dims);
+    float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    float3 rayDir = normalize(
+        ndc.x * sky.camera.x * sky.camera.y * sky.camRight.xyz +
+        ndc.y * sky.camera.x * sky.camUp.xyz +
+        sky.camForward.xyz);
+
+    float3 skyColor = float3(0.0);
+    if (rayDir.y > -0.05) {
+        // Perf toggle (camera.w > 0.5, DEBUG): substitute a flat gradient for the
+        // costly atmospheric raymarch, to isolate its cost.
+        if (sky.camera.w > 0.5) {
+            skyColor = mix(float3(0.18, 0.34, 0.62), float3(0.55, 0.70, 0.92),
+                           saturate(rayDir.y));
+        } else {
+            const float3 origin = float3(0.0, sky.radii.x + sky.radii.z, 0.0);
+            const float3 sunDir = normalize(sky.sunDirection.xyz);
+            const float3 radiance = computeSkyRadiance(origin, rayDir, sunDir, sky);
+            skyColor = 1.0 - exp(-radiance * sky.radii.w);
+        }
+    }
+    dst.write(float4(skyColor, 1.0), full);
+}
+
 fragment float4 sky_background_fragment(BackgroundInOut in [[stage_in]],
                                         constant SkyUniforms &sky [[buffer(0)]],
                                         texture2d<float> landscape [[texture(0)]],
+                                        texture2d<float, access::read> skyAccum [[texture(1)]],
                                         sampler smp [[sampler(0)]]) {
     // Reconstruct the world-space view ray. Camera convention (shared with
     // Cloud.metal): -Z = North, +X = East, +Y = up. The gaze can be rotated
@@ -419,26 +468,16 @@ fragment float4 sky_background_fragment(BackgroundInOut in [[stage_in]],
         ndc.y * tanHalfFov * sky.camUp.xyz +
         sky.camForward.xyz);
 
-    // Eye at the surface; planet centered at the origin so +Y is radial up.
-    const float3 origin = float3(0.0, sky.radii.x + sky.radii.z, 0.0);
     const float3 sunDir = normalize(sky.sunDirection.xyz);
 
-    // Tonemap the HDR sky to display range (simple exponential exposure). Skip
-    // the (costly) integral well below the horizon, where the sky is fully
-    // occluded by the sea/ground and only its faint cross-fade near the horizon
-    // line would ever use it.
-    const float exposure = sky.radii.w;
+    // Sky colour comes from `skyAccum`, filled by the amortized `sky_radiance_kernel`
+    // (the costly per-pixel atmospheric raymarch is done there, a quarter of the
+    // pixels per frame at rest, since the sky changes slowly). This pass stays
+    // full-rate for the animated sea below. Read at this pixel — same half-res
+    // grid as the kernel wrote.
     float3 skyColor = float3(0.0);
     if (rayDir.y > -0.05) {
-        // Perf toggle (camera.w > 0.5, DEBUG): skip the per-pixel atmospheric
-        // raymarch and substitute a flat gradient, to isolate its cost.
-        if (sky.camera.w > 0.5) {
-            skyColor = mix(float3(0.18, 0.34, 0.62), float3(0.55, 0.70, 0.92),
-                           saturate(rayDir.y));
-        } else {
-            const float3 radiance = computeSkyRadiance(origin, rayDir, sunDir, sky);
-            skyColor = 1.0 - exp(-radiance * exposure);
-        }
+        skyColor = skyAccum.read(uint2(in.position.xy)).rgb;
     }
 
     const float3 discMoonDir = normalize(sky.moonDirection.xyz);
