@@ -75,9 +75,32 @@ xcrun simctl io "$SIM" screenshot build/shot.png
 
 Le rendu Metal n'étant pas testable unitairement, **chaque étape se vérifie par
 capture d'écran sur simulateur**. Les gestes ne se pilotent pas sans
-interaction : pour vérifier le rendu d'un paysage/nuage donné, injecter
-temporairement un `SceneContext` (ou un trait pré-peint dans `CanvasModel`),
-capturer, **puis retirer le code temporaire**.
+interaction : pour injecter une scène déterministe (paysage + nuages + heure),
+utiliser le **harnais DEBUG** ci-dessous plutôt que du code temporaire.
+
+### Outillage DEBUG (harnais & profilage)
+
+Compilé **hors** des builds Release/App Store (`#if DEBUG`). Pour l'activer dans
+un build Release (profilage perf en `-O`), passer
+`SWIFT_ACTIVE_COMPILATION_CONDITIONS='DEBUG'` à `xcodebuild`.
+
+- **`ScreenshotHarness`** (`Aether/App/ScreenshotHarness.swift`) : démarre l'app
+  sur une scène injectée via la variable d'env **`AETHER_SHOT=scene:hour:chrome:cloud`**.
+  - `scene` : `dusk` | `dawn` | `blue` | `noon` (index galerie 0…3)
+  - `hour` : heure locale décimale (`13`, `18.5`, `-` = défaut scène)
+  - `chrome` : `hidden` (ciel plein cadre) | `shown`
+  - `cloud` : `cumulus` | `scattered` | `band` | `perf` (pire cas 3 étages) | `none`
+  - Les calques injectés reçoivent les **défauts météo de la scène** (comme la
+    peinture à la main) — pas de divergence debug/réel.
+  - Lancement device : `xcrun devicectl device process launch --device <id>
+    --environment-variables '{"AETHER_SHOT":"noon:13:shown:perf"}' <bundle>`.
+    Simulateur : préfixe `SIMCTL_CHILD_` (`SIMCTL_CHILD_AETHER_SHOT=…`).
+- **Overlay FPS** (`DebugHUD` + badge `CanvasView`) : le FPS mesuré par
+  `Renderer.draw` s'affiche à l'écran (à gauche, centré) — lecture perf *dans
+  l'app* sur device, sans Console.
+- **Interrupteurs de passe** (profilage) : `AETHER_PERF_NOSKY` / `AETHER_PERF_NOSEA`
+  / `AETHER_PERF_NOCLOUD` = `1` désactivent une passe pour isoler son coût, sans
+  rebuild (relancer avec une autre combinaison de variables d'env).
 
 ### Contrôle qualité statique
 

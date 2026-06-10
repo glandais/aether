@@ -98,18 +98,34 @@ soft-particles dans `Cloud.metal`, champ `SceneContext.depthMap`) a été suppri
 Les nuages se peignent désormais sur tout le cadre, dans toutes les directions du
 ciel (couverture directionnelle des coquilles).
 
-**Étape 7 (demi-résolution + amortissement temporel) — terminée.**
+**Étape 7 (demi-résolution + amortissement temporel) — terminée, puis refondue
+(profilage device, cf. « Amortissement par compute compact »).**
 - [x] Raymarch rendu hors écran à demi-résolution (RGBA16Float HDR), puis
   upsamplé/composité plein écran (`Composite.metal`)
-- [x] Amortissement temporel : 1 cellule 2×2 sur 4 raymarchée par frame, le
-  reste réutilisé depuis l'historique (ping-pong de 2 cibles)
-- [x] ~1/16 du coût raymarch par frame (¼ pixels × ¼ temporel), parité visuelle
-  vérifiée sur simulateur
+- [x] Amortissement temporel : ¼ des pixels (cellule 2×2) raymarchés par frame
+  au repos, le reste réutilisé d'une cible persistante
+- [x] ~1/16 du coût raymarch par frame au repos (¼ pixels × ¼ temporel), parité
+  visuelle vérifiée
 
 Caméra fixe → pas de motion vectors : la « reprojection » se réduit à une
 accumulation temporelle au même pixel (rafraîchissement sur 4 frames,
 invisible vu la dérive lente). Une caméra mobile nécessiterait de vrais motion
 vectors. Référence : Häkkinen, Nubis Evolved (voir `BIBLIO.md`).
+
+> **Refonte de l'amortissement (compute compact).** Le profilage sur device
+> (iPhone 13 Pro Max) a révélé que le schéma 2×2 d'origine — une passe **fragment
+> plein écran** où ¾ des pixels sortaient tôt (lecture d'historique) — ne
+> gagnait **rien** : dans chaque quad 2×2, le pixel qui raymarche fait diverger
+> tout le warp SIMD, donc les lanes qui sortent tôt **attendent**. Repos =
+> mouvement = 15 ips. Corrigé en passant le nuage **et** la radiance du ciel à
+> des **compute kernels** (`cloud_kernel`, `sky_radiance_kernel`) qui écrivent
+> une cible persistante aux positions dispersées `gid·stride + offset` : au repos
+> `stride = 2`, seule la cellule active (¼ des pixels) est lancée, **compacte** —
+> tous les threads marchent, plus de divergence. En mouvement `stride = 1`,
+> refresh complet. Supprime le ping-pong et la texture d'historique (la cible
+> accumule). **La mer, animée, n'est pas amortie** : la passe ciel+mer reste
+> plein régime et ne fait que lire le cache `skyAccum` pour le ciel. Mesuré
+> scène 3 étages : **15/15 → 39/25 ips** (repos/mouvement).
 
 **Étape 8 (position soleil/lune dynamique) — terminée.**
 - [x] `SwiftAAAstroService` (Services) : position apparente soleil/lune en
@@ -240,19 +256,22 @@ Vérifié au simulateur : midi → ciel bleu, coucher → rougeoiement bas-horiz
   d'échelle, anisotropie `g`, rayons planète/atmosphère, hauteur d'œil,
   intensité). Défaut `Atmosphere.earth` (valeurs terrestres Bruneton/Hillaire).
   Voyage Feature → `Renderer` en uniformes, comme `CloudParameters`.
-- **`Rendering/Shaders/Background.metal`** : `sky_background_fragment` reconstruit
-  un rayon de vue monde par pixel (même convention que `Cloud.metal` : -Z = Nord,
-  +X = Est, +Y = haut, FOV via `tanHalfFov` + aspect), puis intègre la diffusion
-  simple Rayleigh + Mie (marche primaire + light-march vers le soleil) →
-  rougeoiement bas-soleil et halo de Mie *gratuits*, pilotés par la même
-  `sunDirection` que le nuage. Sous l'horizon : dégradé paysage conservé
-  (cross-fade sur `rayDir.y`), assombri par le facteur d'éclairement de sol
-  (`camera.z`). `background_vertex` (triangle plein écran) est partagé ;
-  l'ancien `background_fragment` placeholder a été retiré.
+- **`Rendering/Shaders/Background.metal`** : la diffusion simple Rayleigh + Mie
+  (marche primaire + light-march vers le soleil, `computeSkyRadiance`) est
+  raymarchée par pixel (même convention de rayon que `Cloud.metal` : -Z = Nord,
+  +X = Est, +Y = haut, FOV via `tanHalfFov` + aspect) → rougeoiement bas-soleil
+  et halo de Mie *gratuits*, pilotés par la même `sunDirection` que le nuage.
+  **Cette radiance est amortie** comme le nuage : `sky_radiance_kernel` (compute)
+  l'écrit dans `skyAccum` (¼ des pixels au repos, cf. « Refonte de
+  l'amortissement »). `sky_background_fragment` reste **plein régime** pour la
+  mer animée (sous-horizon) et ne fait que **lire `skyAccum`** pour le ciel, plus
+  les disques soleil/lune. Sous l'horizon : dégradé paysage conservé (cross-fade
+  sur `rayDir.y`), assombri par le facteur d'éclairement de sol (`camera.z`).
+  `background_vertex` (triangle plein écran) est partagé.
 
-**Choix d'implémentation** : marche temps réel par pixel (pas de LUT). Caméra
-fixe + soleil lent → le fond est cacheable et négligeable devant le raymarch
-nuage (demi-rés + temporel). Passer à des LUT Hillaire-2020 seulement si le
+**Choix d'implémentation** : marche temps réel par pixel (pas de LUT), mais
+**amortie** (compute compact, ¼ des pixels au repos). Passer à des LUT
+Hillaire-2020 seulement si le
 profilage device l'exige ; toute LUT échantillonnée `filter::linear` doit être
 `RGBA16Float` (pas `R32Float`, cf. pièges connus dans `CLAUDE.md`).
 
@@ -353,7 +372,8 @@ peinture devient une **carte de couverture 2D directionnelle** (azimut ×
   planète ~3·10⁻⁴). Transmittance/in-scatter **partagés** entre coquilles (un
   cirrus translucide laisse voir le cumulus dessous) ; pas borné `dmod` au ras de
   l'horizon ; auto-ombrage seul (light march borné à la coquille). Demi-rés +
-  amortissement temporel **inchangés**.
+  amortissement temporel conservés, désormais via **compute kernel compact**
+  (`cloud_kernel`, cf. « Refonte de l'amortissement » à l'étape 7).
 - **Plomberie** : `Renderer.updateLayers` ; `MetalView`/`CanvasView` passent
   `model.layers`. `CloudUniforms` porte un tableau de `Shell` (≤ `maxCount`,
   triées) + `layerCount` ; chaque `Shell` connaît sa tranche d'atlas
@@ -397,15 +417,20 @@ Shadertoy `Ms2SD1`, portée en MSL — attribution conservée en en-tête de
     lune est levée et se reflète dans l'eau visible (lune haute ⇒ il faut baisser
     les yeux, physiquement correct).
 - **Perf — demi-résolution.** Le raymarch de mer est coûteux. La passe
-  **ciel + mer** est désormais rendue **hors écran à demi-résolution** (HDR
+  **ciel + mer** est rendue **hors écran à demi-résolution** (HDR
   `cloudColorFormat`, `skyTarget` créé avec les cibles nuage), puis upsamplée
   (bilinéaire) et composée « over » au passage composite — comme le nuage. La
-  composition empile : ciel+mer upsamplé, puis nuage upsamplé. ~4× sur le coût
-  fragment dominant : **60 ips sur device** (iPhone 13 Pro Max) — vs ~5 ips en
-  plein écran avec intégrales par pixel, ~13 ips après réduction des intégrales,
-  60 ips une fois la passe en demi-rés.
+  composition empile : ciel+mer upsamplé, puis nuage upsamplé. La **radiance du
+  ciel** est en plus amortie dans le temps (compute compact, cf. étape 7) ; **la
+  mer reste plein régime** car animée. Profilage device (iPhone 13 Pro Max, scène
+  3 étages dense) : la session perf a porté l'arrêt de 15 à **39 ips** (nuage puis
+  ciel amortis). Reste à gagner : la mer (~7 ms, non amortissable) et les pas du
+  raymarch.
 - **FPS** : `Renderer.draw` journalise les images/s (~1 s, os.log, subsystem
   `io.github.glandais.aether`, catégorie `Renderer`) — `log stream --level info`.
+  En **DEBUG**, ce FPS est aussi poussé vers un overlay à l'écran (`DebugHUD` +
+  badge `CanvasView`) et le profilage par passe se pilote par variables d'env
+  (cf. CLAUDE.md « Profilage perf »).
 
 ## Soleil & lune dessinés dans le ciel — terminé
 
