@@ -95,7 +95,7 @@
         <article class="feature">
           <div class="feature__num">A — Brush</div>
           <h3 class="feature__title">Paint clouds with a finger.</h3>
-          <p>Draw silhouettes on a simple canvas; a volumetric raymarcher turns each stroke into a real three-dimensional cloud, accumulated in a density field built from Perlin–Worley noise. Adjust brush radius and softness as you go.</p>
+          <p>Draw silhouettes on a simple canvas; a volumetric raymarcher turns each stroke into real three-dimensional clouds. Paint across three altitudes — cumulus, altocumulus and cirrus — each its own editable layer, with brush radius, softness and opacity at hand.</p>
         </article>
 
         <article class="feature">
@@ -113,7 +113,7 @@
         <article class="feature">
           <div class="feature__num">D — Free gaze</div>
           <h3 class="feature__title">Look anywhere. Keep painting.</h3>
-          <p>Rotate the view with one finger and pinch to zoom — nothing erases. Paint in a new direction and a fresh cloud opens there, anchored in world space, so you can fill the whole sky around you.</p>
+          <p>Rotate the view with one finger and pinch to zoom — nothing erases. Coverage is painted by the direction you face, so look around and keep painting to fill the whole sky around you.</p>
         </article>
 
         <article class="feature">
@@ -223,9 +223,10 @@
       <div class="container-narrow" style="padding-inline: 0;">
         <p class="lead">
           A native Swift 6 and SwiftUI app, rendered by a Metal volumetric
-          pipeline — raymarching, 3D noise, Henyey–Greenstein scattering and a
-          powder effect — held at a smooth frame rate on iPhone through half-resolution
-          tracing and temporal reprojection.
+          pipeline — raymarching through concentric cloud shells, 3D noise,
+          Henyey–Greenstein scattering and a powder effect — held at a smooth
+          frame rate on iPhone through half-resolution tracing, temporal
+          reprojection and a MetalFX spatial upscale.
         </p>
         <p>
           Solar and lunar positions come from astronomical formulae; the sky is
