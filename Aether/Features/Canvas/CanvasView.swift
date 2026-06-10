@@ -22,10 +22,12 @@ private enum AutoPlay {
 }
 
 /// Panneau d'outil ouvert. Exclusif : un seul à la fois, pour ne pas encombrer
-/// le ciel ni déborder en paysage. `more` regroupe les réglages contextuels
+/// le ciel ni déborder en paysage. `paint` réunit la peinture (sélection
+/// d'étage, visibilité, opacité, réglages de pinceau) ; il s'affiche de lui-même
+/// tant qu'on peint, sans bascule. `more` regroupe les réglages contextuels
 /// (ciel, lieu) sous un seul bouton, façon « More » HIG.
-private enum ToolPanel {
-    case brush, layers, more
+fileprivate enum ToolPanel {
+    case paint, more
 }
 
 struct CanvasView: View {
@@ -54,9 +56,10 @@ struct CanvasView: View {
     @State private var autoPlay: AutoPlay = .none
     /// Multiplicateur de vitesse du défilement (1, 2, 4, 8, 16). 1× = 0,25 h/s.
     @State private var autoPlaySpeed = 1
-    /// Panneau d'outil ouvert (pinceau, ou « More » = ciel + lieu). Exclusif :
-    /// ouvrir l'un referme l'autre. Rendu en carte flottante **à côté** des
-    /// pastilles (pas d'expansion inline qui repousserait la colonne).
+    /// Panneau d'outil explicitement ouvert. Seul « More » (ciel + lieu) s'y
+    /// pose : le panneau peinture s'affiche de lui-même tant qu'on peint, sans
+    /// passer par cet état. Rendu en carte flottante **à côté** des pastilles
+    /// (pas d'expansion inline qui repousserait la colonne).
     @State private var activePanel: ToolPanel?
     /// Révèle toutes les options (retour, regard, pinceau, heure). Déployé à
     /// l'ouverture : l'outil dessin actif est ainsi visible d'emblée ; on peut
@@ -142,7 +145,7 @@ struct CanvasView: View {
     private static let moonDiscTint = SIMD3<Float>(0.85, 0.88, 1.0)
 
     /// Éclairage résolu pour l'instant courant : direction, couleur, ambiance.
-    private struct ResolvedLight {
+    fileprivate struct ResolvedLight {
         var direction: SIMD3<Float>
         /// Direction monde du soleil (pour le ciel ; le ciel reste sombre la nuit
         /// quand le soleil est sous l'horizon, là où `direction` suit la lune).
@@ -327,7 +330,6 @@ struct CanvasView: View {
             if showOptions {
                 rotateButton.transition(reveal)
                 brushBubble.transition(reveal)
-                layersBubble.transition(reveal)
                 // Annuler / rétablir / effacer : pastilles principales directes
                 // (pas de sous-menu), révélées seulement dès qu'il y a à éditer.
                 if hasEdits {
@@ -349,14 +351,14 @@ struct CanvasView: View {
     }
 
     /// Carte du panneau visible, en matériau translucide : « More » s'il est
-    /// ouvert ; sinon, en mode dessin (options déployées), les réglages de
-    /// pinceau — toujours présents tant qu'on peint, sans bascule.
+    /// ouvert ; sinon, en mode dessin (options déployées), la carte peinture
+    /// (sélection d'étage, visibilité, opacité, réglages de pinceau) — toujours
+    /// présente tant qu'on peint, sans bascule.
     @ViewBuilder
     private func activePanelCard(light: ResolvedLight) -> some View {
         let panel: ToolPanel? =
             activePanel == .more ? .more
-            : activePanel == .layers ? .layers
-            : (showOptions && !model.isRotating ? .brush : nil)
+            : (showOptions && !model.isRotating ? .paint : nil)
         if let panel {
             panelContent(panel, light: light)
                 .padding(16)
@@ -812,8 +814,8 @@ struct CanvasView: View {
         Button {
             withAnimation(.easeInOut(duration: 0.2)) {
                 model.isRotating = false
-                // Referme tout panneau explicite (More, Calques) pour révéler les
-                // réglages de pinceau tant qu'on peint.
+                // Referme « More » pour révéler la carte peinture (étages +
+                // pinceau) tant qu'on peint.
                 activePanel = nil
             }
         } label: {
@@ -823,33 +825,24 @@ struct CanvasView: View {
         .accessibilityLabel(Text(String(localized: "group.brush", table: "Aether")))
     }
 
-    /// Pastille « Calques » : sélecteur d'étage (cirrus / altocumulus / cumulus),
-    /// visibilité et opacité par calque. Le calque sélectionné reçoit la peinture.
-    private var layersBubble: some View {
-        bubbleToggle(.layers, icon: "square.3.layers.3d", label: "group.layers")
-    }
-
     /// Pastille « More » : regroupe les réglages contextuels (ciel, lieu).
     private var moreBubble: some View {
         bubbleToggle(.more, icon: "ellipsis", label: "group.more")
     }
+}
 
+// MARK: - Panneaux & gestes
+//
+// Contenu des cartes flottantes (peinture, « More »), contrôles par calque et
+// pinceau, recadrage sur un astre, et les gestes de peinture / rotation. Séparés
+// du corps principal pour garder `CanvasView` sous la limite de longueur.
+extension CanvasView {
     /// Contenu du panneau actif.
     @ViewBuilder
-    private func panelContent(_ panel: ToolPanel, light: ResolvedLight) -> some View {
+    fileprivate func panelContent(_ panel: ToolPanel, light: ResolvedLight) -> some View {
         switch panel {
-        case .brush:
-            VStack(spacing: 14) {
-                brushSlider(
-                    icon: "smallcircle.filled.circle",
-                    value: binding(\.brushRadius), range: 0.03...0.25)
-                brushSlider(
-                    icon: "drop",
-                    value: binding(\.brushSoftness), range: 0...1)
-            }
-            .frame(width: 180)
-        case .layers:
-            layersPanel
+        case .paint:
+            paintPanel
         case .more:
             // Réglages contextuels (rares par geste) : ciel (centrer soleil/lune,
             // éphéméride) et lieu. Les actions qui ouvrent une feuille (carte,
@@ -891,11 +884,13 @@ struct CanvasView: View {
         }
     }
 
-    /// Panneau « Calques » : sélecteur d'étage, visibilité et opacité du calque
-    /// sélectionné. Sobre — une poignée de contrôles, façon éditeur d'images
+    /// Panneau « Peinture » : tout le geste de dessin sur une seule carte —
+    /// sélecteur d'étage (visibilité), opacité du calque sélectionné, puis
+    /// réglages de pinceau (rayon, douceur). Sobre, façon éditeur d'images
     /// minimal. Les étages sont listés du plus haut (cirrus) au plus bas
-    /// (cumulus), comme on les lit dans le ciel.
-    private var layersPanel: some View {
+    /// (cumulus), comme on les lit dans le ciel ; les réglages de pinceau,
+    /// globaux, suivent sous un filet.
+    private var paintPanel: some View {
         let active = model.activeGenus
         return VStack(alignment: .leading, spacing: 14) {
             ForEach(Self.genusOrder, id: \.self) { genus in
@@ -903,6 +898,13 @@ struct CanvasView: View {
             }
             Divider()
             opacityControl(for: active)
+            Divider()
+            brushSlider(
+                icon: "smallcircle.filled.circle",
+                value: binding(\.brushRadius), range: 0.03...0.25)
+            brushSlider(
+                icon: "drop",
+                value: binding(\.brushSoftness), range: 0...1)
         }
         .frame(width: 230)
     }
@@ -1010,7 +1012,7 @@ struct CanvasView: View {
         Binding(get: { model[keyPath: keyPath] }, set: { model[keyPath: keyPath] = $0 })
     }
 
-    private func editButton(
+    fileprivate func editButton(
         _ systemName: String, _ labelKey: String.LocalizationValue,
         enabled: Bool, action: @escaping () -> Void
     ) -> some View {
@@ -1040,7 +1042,7 @@ struct CanvasView: View {
     private static let yawSpan: Float = 2.0
     private static let pitchSpan: Float = 1.6
 
-    private func paintGesture(in size: CGSize) -> some Gesture {
+    fileprivate func paintGesture(in size: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 if isZooming { return }  // un pincement est en cours : pas de trait
