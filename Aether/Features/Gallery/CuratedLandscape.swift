@@ -19,8 +19,13 @@ struct CuratedLandscape: Identifiable {
 
     func makeContext() -> SceneContext? {
         guard let image = LandscapeFactory.image(palette: palette) else { return nil }
+        // Cadrage contemplatif : viser ~14° au-dessus de l'horizontale pour poser
+        // l'horizon au quart bas du cadre (mer ≈ 25 %) et dégager le ciel à peindre.
+        // Géométrie : horizon à la fraction f du bas ⇔ tan(pitch) = (1 − 2f)·tan(fov/2).
+        let framingPitch = atan(0.5 * tan(Scene.defaultFieldOfView / 2))  // f = 0.25
         let scene = Scene(
             title: title, coordinate: coordinate, date: date,
+            pitch: framingPitch,
             timeZoneIdentifier: timeZoneIdentifier)
         // Paysages curés abstraits : plein cadre (displayAspect nil).
         return SceneContext(
