@@ -109,6 +109,19 @@ final class CanvasModel {
         isDrawing = false
     }
 
+    /// Annule le trait en cours : un second doigt s'est posé (geste caméra), le
+    /// trait amorcé était accidentel. Restaure l'instantané empilé par
+    /// `beginStroke` SANS toucher la pile de rétablissement (ce n'est pas une
+    /// action utilisateur réversible, juste l'annulation d'une amorce).
+    func cancelStroke() {
+        guard isDrawing, let previous = undoStack.popLast() else {
+            isDrawing = false
+            return
+        }
+        layers = previous
+        isDrawing = false
+    }
+
     /// Sélectionne le calque actif (étage de peinture). Pure sélection d'outil —
     /// pas une action réversible, donc hors historique.
     func selectGenus(_ genus: CloudGenus) {

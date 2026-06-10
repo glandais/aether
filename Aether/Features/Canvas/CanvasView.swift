@@ -63,9 +63,8 @@ struct CanvasView: View {
     @State private var rotationAnchor: SIMD2<Float>?
     /// Champ de vision choisi (radians). `nil` = FOV d'origine de la scène.
     @State private var fovOverride: Double?
-    /// FOV au début d'un pincement, et garde anti-trait pendant le zoom.
+    /// FOV au début d'un pincement (baseline du geste de zoom).
     @State private var fovAnchor: Double?
-    @State private var isZooming = false
     /// Étoiles visibles résolues pour le lieu/heure courant, et leur révision.
     /// Recalculées seulement quand `starKey` change (cf. `.task`), jamais par
     /// frame de rotation/zoom.
@@ -591,14 +590,25 @@ struct CanvasView: View {
             contentID: context.id
         )
         .overlay {
-            // GeometryReader interne : taille réelle du rendu (cadre lettré ou
-            // plein écran) pour normaliser les coordonnées du pinceau.
-            GeometryReader { geometry in
-                Color.clear
-                    .contentShape(Rectangle())
-                    .gesture(paintGesture(in: geometry.size))
-                    .simultaneousGesture(zoomGesture)
-            }
+            // Couche de gestes UIKit : les `bounds` valent la taille réelle du
+            // rendu (cadre lettré ou plein écran) pour normaliser les coordonnées
+            // du pinceau. Un doigt peint (ou pivote en mode regard) ; deux doigts
+            // pilotent toujours la caméra (glissement → rotation, pincement → zoom).
+            CanvasGestureView(
+                isRotating: model.isRotating,
+                onPaintBegan: { loc, size in paint(at: loc, in: size) },
+                onPaintMoved: { loc, size in paint(at: loc, in: size) },
+                onPaintEnded: { model.endStroke() },
+                onPaintCancelled: { model.cancelStroke() },
+                onRotateBegan: { rotationAnchor = nil },
+                onRotateChanged: { translation, size in rotate(translation: translation, in: size) },
+                onRotateEnded: { rotationAnchor = nil },
+                onZoomBegan: { fovAnchor = effectiveFieldOfView },
+                onZoomChanged: { scale in
+                    let target = (fovAnchor ?? effectiveFieldOfView) / Double(scale)
+                    fovOverride = min(max(target, Self.minFieldOfView), Self.maxFieldOfView)
+                },
+                onZoomEnded: { fovAnchor = nil })
         }
         #if DEBUG
         .overlay(alignment: .leading) { debugFPSBadge }
@@ -1069,55 +1079,13 @@ extension CanvasView {
     private static let yawSpan: Float = 2.0
     private static let pitchSpan: Float = 1.6
 
-    fileprivate func paintGesture(in size: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 0)
-            .onChanged { value in
-                if isZooming { return }  // un pincement est en cours : pas de trait
-                if model.isRotating {
-                    rotate(value, in: size)
-                } else {
-                    paint(value, in: size)
-                }
-            }
-            .onEnded { _ in
-                if model.isRotating {
-                    rotationAnchor = nil
-                } else {
-                    model.endStroke()
-                }
-            }
-    }
-
-    /// Pincement à deux doigts → champ de vision (zoom). Disponible **seulement
-    /// en mode rotation** (le pincement est un mouvement de caméra, comme le
-    /// drag qui pivote le regard). Pincer pour écarter (magnification > 1)
-    /// rétrécit le FOV (zoom avant). Le nuage étant à position réelle en monde,
-    /// le zoom ne l'efface plus : on zoome dans/hors d'un nuage fixe. Clampé
-    /// entre min/max FOV.
-    fileprivate var zoomGesture: some Gesture {
-        MagnifyGesture()
-            .onChanged { value in
-                guard model.isRotating else { return }
-                if fovAnchor == nil {
-                    fovAnchor = effectiveFieldOfView
-                    isZooming = true
-                }
-                let target = (fovAnchor ?? effectiveFieldOfView) / Double(value.magnification)
-                fovOverride = min(max(target, Self.minFieldOfView), Self.maxFieldOfView)
-            }
-            .onEnded { _ in
-                fovAnchor = nil
-                isZooming = false
-            }
-    }
-
     /// Peinture d'un trait (coordonnées normalisées au canvas). Le trait fige la
     /// pose de caméra courante : le Rendering projettera le trait dans le volume
     /// monde via cette pose, donc il reste en place quand on tourne ensuite.
-    private func paint(_ value: DragGesture.Value, in size: CGSize) {
+    private func paint(at point: CGPoint, in size: CGSize) {
         let point = SIMD2(
-            Float(value.location.x / size.width),
-            Float(value.location.y / size.height)
+            Float(point.x / size.width),
+            Float(point.y / size.height)
         ).clamped()
         if model.isDrawing {
             model.extendStroke(to: point)
@@ -1135,7 +1103,7 @@ extension CanvasView {
     /// à droite (on tourne la tête à gauche) ; drag vers le bas → on lève les
     /// yeux. Le nuage étant à position réelle en monde, pivoter ne l'efface plus :
     /// on regarde autour / on l'orbite.
-    private func rotate(_ value: DragGesture.Value, in size: CGSize) {
+    private func rotate(translation: CGSize, in size: CGSize) {
         let anchor: SIMD2<Float>
         if let existing = rotationAnchor {
             anchor = existing
@@ -1143,8 +1111,8 @@ extension CanvasView {
             anchor = SIMD2(model.viewYaw, model.viewPitch)
             rotationAnchor = anchor
         }
-        let yaw = anchor.x - Float(value.translation.width / size.width) * Self.yawSpan
-        let pitch = anchor.y + Float(value.translation.height / size.height) * Self.pitchSpan
+        let yaw = anchor.x - Float(translation.width / size.width) * Self.yawSpan
+        let pitch = anchor.y + Float(translation.height / size.height) * Self.pitchSpan
         model.setRotation(yaw: yaw, pitch: pitch)
     }
 }
