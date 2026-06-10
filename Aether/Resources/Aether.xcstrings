@@ -2,7 +2,7 @@
   "sourceLanguage" : "fr",
   "strings" : {
     "action.back" : {
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -20,7 +20,7 @@
     },
     "action.cancel" : {
       "comment" : "Bouton annulant la sélection (feuille de choix du lieu).",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -38,7 +38,7 @@
     },
     "action.clear" : {
       "comment" : "Bouton effaçant tous les nuages peints.",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -56,7 +56,7 @@
     },
     "action.confirm" : {
       "comment" : "Bouton validant le lieu choisi sur la carte.",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -74,7 +74,7 @@
     },
     "action.redo" : {
       "comment" : "Accessibilité : bouton rétablir le trait annulé.",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -92,7 +92,7 @@
     },
     "action.save" : {
       "comment" : "Bouton enregistrant le ciel courant dans un fichier .aether.",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -110,7 +110,7 @@
     },
     "action.undo" : {
       "comment" : "Accessibilité : bouton annuler le dernier trait.",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -128,7 +128,7 @@
     },
     "app.tagline" : {
       "comment" : "Sous-titre atmosphérique, registre sobre. Non encore affiché.",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -146,7 +146,7 @@
     },
     "ephemeris.alwaysDown" : {
       "comment" : "Éphéméride : astre sous l'horizon tout le jour (nuit polaire).",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -164,7 +164,7 @@
     },
     "ephemeris.alwaysUp" : {
       "comment" : "Éphéméride : astre au-dessus de l'horizon tout le jour (soleil de minuit).",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -182,7 +182,7 @@
     },
     "ephemeris.illumination" : {
       "comment" : "Éphéméride : libellé de la fraction éclairée de la Lune.",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -200,7 +200,7 @@
     },
     "ephemeris.moon" : {
       "comment" : "Éphéméride : nom de l'astre Lune (cas circumpolaire).",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -218,7 +218,7 @@
     },
     "ephemeris.moonrise" : {
       "comment" : "Éphéméride : heure du lever de la Lune.",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -236,7 +236,7 @@
     },
     "ephemeris.moonset" : {
       "comment" : "Éphéméride : heure du coucher de la Lune.",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -254,7 +254,7 @@
     },
     "ephemeris.phase" : {
       "comment" : "Éphéméride : libellé de la phase lunaire.",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -272,7 +272,7 @@
     },
     "ephemeris.sun" : {
       "comment" : "Éphéméride : nom de l'astre Soleil (cas circumpolaire).",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -290,7 +290,7 @@
     },
     "ephemeris.sunrise" : {
       "comment" : "Éphéméride : heure du lever du Soleil.",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -308,7 +308,7 @@
     },
     "ephemeris.sunset" : {
       "comment" : "Éphéméride : heure du coucher du Soleil.",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -343,7 +343,7 @@
     },
     "gallery.open" : {
       "comment" : "Bouton ouvrant un ciel enregistré (.aether) depuis la galerie.",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -361,7 +361,7 @@
     },
     "gallery.openError" : {
       "comment" : "Alerte : le fichier .aether choisi n'a pas pu être ouvert.",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -379,6 +379,7 @@
     },
     "gallery.openErrorVersion" : {
       "comment" : "Alerte : le fichier .aether provient d'une version antérieure d'Aether (schéma v1) et ne peut être rouvert.",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -396,7 +397,7 @@
     },
     "group.brush" : {
       "comment" : "Accessibilité : bascule du sous-menu réglages du pinceau.",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -414,7 +415,7 @@
     },
     "group.edit" : {
       "comment" : "Accessibilité : bascule du sous-menu édition (annuler/rétablir/effacer).",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -432,6 +433,7 @@
     },
     "group.layers" : {
       "comment" : "Accessibilité : bascule du panneau « Calques » (étages de nuages).",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -449,7 +451,7 @@
     },
     "group.more" : {
       "comment" : "Accessibilité : bascule du panneau « More » (réglages ciel + lieu).",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -467,7 +469,7 @@
     },
     "group.sky" : {
       "comment" : "Accessibilité : bascule du sous-menu ciel (soleil/lune/éphéméride).",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -485,6 +487,7 @@
     },
     "layer.altocumulus" : {
       "comment" : "Nom du calque/genre altocumulus (étage moyen, floconneux).",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -502,6 +505,7 @@
     },
     "layer.cirrus" : {
       "comment" : "Nom du calque/genre cirrus (étage haut, fibreux).",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -519,6 +523,7 @@
     },
     "layer.cumulus" : {
       "comment" : "Nom du calque/genre cumulus (étage bas, bourgeonnant).",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -536,6 +541,7 @@
     },
     "layer.hidden" : {
       "comment" : "Accessibilité : valeur du calque masqué (étage éteint).",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -553,6 +559,7 @@
     },
     "layer.opacity" : {
       "comment" : "Accessibilité : curseur d'opacité du calque sélectionné.",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -570,6 +577,7 @@
     },
     "layer.visibility" : {
       "comment" : "Accessibilité : bascule de visibilité du calque (étage allumé/éteint).",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -587,6 +595,7 @@
     },
     "layer.visible" : {
       "comment" : "Accessibilité : valeur du calque visible (étage allumé).",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -621,7 +630,7 @@
     },
     "location.hereNow" : {
       "comment" : "Accessibilité : bouton recalant lieu, jour et heure sur l'instant courant.",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -656,7 +665,7 @@
     },
     "mode.lookAround" : {
       "comment" : "Accessibilité : bouton activant la rotation du regard.",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -673,7 +682,7 @@
       }
     },
     "mode.options" : {
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -690,7 +699,7 @@
       }
     },
     "moon.firstQuarter" : {
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -707,7 +716,7 @@
       }
     },
     "moon.full" : {
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -724,7 +733,7 @@
       }
     },
     "moon.lastQuarter" : {
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -741,7 +750,7 @@
       }
     },
     "moon.new" : {
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -758,7 +767,7 @@
       }
     },
     "moon.waningCrescent" : {
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -775,7 +784,7 @@
       }
     },
     "moon.waningGibbous" : {
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -792,7 +801,7 @@
       }
     },
     "moon.waxingCrescent" : {
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -809,7 +818,7 @@
       }
     },
     "moon.waxingGibbous" : {
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -827,7 +836,7 @@
     },
     "sky.centerMoon" : {
       "comment" : "Accessibilité : bouton centrant le regard sur la Lune.",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -845,7 +854,7 @@
     },
     "sky.centerSun" : {
       "comment" : "Accessibilité : bouton centrant le regard sur le Soleil.",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -863,7 +872,7 @@
     },
     "time.advance" : {
       "comment" : "Accessibilité : bascule d'avance automatique du temps.",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -880,7 +889,7 @@
       }
     },
     "time.date" : {
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -898,7 +907,7 @@
     },
     "time.rewind" : {
       "comment" : "Accessibilité : bascule de recul automatique du temps.",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -916,7 +925,7 @@
     },
     "time.speed" : {
       "comment" : "Accessibilité : bouton réglant la vitesse de défilement (1×…16×).",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
