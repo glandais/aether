@@ -6,8 +6,8 @@
 > v2, et nettoyage final (cubes / atlas 3D / multi-cubes retirés). Le rendu visible
 > est désormais entièrement coquilles ; `scripts/verify.sh` est vert sans exception.
 > Détail dans [`PIPELINE.md`](PIPELINE.md) (« Calques multi-coquilles »). Les
-> valeurs numériques (rayons, épaisseurs, `noiseScale`) restent à affiner par
-> capture (cf. §12).
+> valeurs numériques (rayons, épaisseurs, `noiseScale`) sont **calées par
+> capture** (session 2026-06) ; reste la validation sur device réel (§12).
 
 ## 1. Pourquoi
 
@@ -95,9 +95,11 @@ enum CloudGenus: String, Codable, Sendable, CaseIterable {
 
     var shell: ShellSpec {
         switch self {
-        case .cirrus:      .init(inner: 207_000, outer: 207_600, cloudType: 0.05, noiseScale: 6.4e-4, drift: .init(0.030, 0.004))
-        case .altocumulus: .init(inner: 204_000, outer: 205_000, cloudType: 0.45, noiseScale: 3.9e-4, drift: .init(0.016, 0.006))
-        case .cumulus:     .init(inner: 201_000, outer: 203_000, cloudType: 0.85, noiseScale: 3.0e-4, drift: .init(0.010, 0.004))
+        // Valeurs calées par capture (session 2026-06) : cirrus en voile doux,
+        // altocumulus floconneux mince, cumulus bourgeonnant granuleux.
+        case .cirrus:      .init(inner: 207_000, outer: 207_800, cloudType: 0.10, noiseScale: 3.2e-4, drift: .init(0.030, 0.004))
+        case .altocumulus: .init(inner: 204_200, outer: 204_800, cloudType: 0.35, noiseScale: 8.0e-4, drift: .init(0.016, 0.006))
+        case .cumulus:     .init(inner: 201_000, outer: 203_000, cloudType: 0.85, noiseScale: 6.5e-4, drift: .init(0.010, 0.004))
         }
     }
 }
@@ -252,6 +254,14 @@ peinture : `base = remap(n.r, 1-painted, …)` puis érosion par le détail) et 
 Aether n'a aujourd'hui ni gradient de hauteur ni `height_fraction` (la forme
 venait du volume peint).
 
+**Ajout au calage (2026-06) — érosion modulée par le genre.** À pleine force
+(0.55), l'érosion Worley HF transforme une nappe haute et fine en moucheté
+sel-et-poivre au lieu d'un voile — et baisser `noiseScale` n'y change rien
+(le moucheté vient des canaux de détail, pas du bruit de base). As-built :
+`erosion = mix(0.18, 0.55, cloudType)` dans `shapeDensity` — le cumulus est
+sculpté fort, le cirrus à peine. C'est ce qui donne au cirrus son rendu de
+voile sans toucher au caractère du cumulus.
+
 ## 7. Ce qui est supprimé / simplifié
 
 | Supprimé | Remplacé par |
@@ -339,12 +349,8 @@ ouverte à de vraies migrations futures. Voir `docs/PERSISTENCE.md`.
   (comportement de la référence, `p.x += time` dans `density()` seulement) — le
   nuage bouillonne sur place, il ne s'enfuit pas.
 
-## 12. Restent à caler (capture / device)
+## 12. Restent à caler (device)
 
-- **Rayons/épaisseurs par genre** : valeurs §4 toujours illustratives (séparation
-  visible des étages, convergence à l'horizon).
-- **`noiseScale` par genre** : ordre de grandeur planète acquis (~3·10⁻⁴, §4),
-  ratios à affiner.
 - **`kSigma` (extinction)** : recalé en unités **par mètre** (0.0045) à
   l'étape 3 — les pas planète font des centaines de mètres, la valeur des cubes
   (11.0) saturait l'opacité en un pas. À confirmer sur device.
@@ -352,16 +358,25 @@ ouverte à de vraies migrations futures. Voir `docs/PERSISTENCE.md`.
   conservé) vs en `p` (1 sample/pas). La marche de **lumière** ré-échantillonne
   déjà par pas (§8) ; seul le rayon de vue reste à arbitrer si l'horizon manque
   d'étirement.
-- **Bruit cirrus** : jugé acceptable à l'étape 4 sans érosion curl/Worley HF ;
-  à reconsidérer si un cirrus plus fibreux est souhaité (`Sky.metal:556-562`).
 - **Nombre de calques** : `maxCount = 4` (cirrus / alto / cumulus +1) — suffisant
   jusqu'à preuve du contraire.
 - **Perf sur device réel** : non profilée (simulateur fluide, non représentatif).
 
-Résolus depuis : la météo statique fournit les mêmes défauts à tous les calques
-(étape 6, surchargés ensuite par calque) ; le regard libre est vérifié (mapping
-directionnel partagé entre `stamp_coverage_map` et le raymarch — un trait reste
-en place quand on tourne/zoome).
+Résolus par la **session de calage par capture (2026-06)** — captures
+`build/calage_*.png`, scène trois étages injectée, midi + crépuscule :
+
+- **Rayons/épaisseurs et `noiseScale` par genre** : valeurs §4 figées. Cumulus
+  201–203 km à 6.5·10⁻⁴ (granulation interne, ~1 période/épaisseur ne suffisait
+  pas) ; altocumulus aminci 204,2–204,8 km, `cloudType` 0.35, 8·10⁻⁴ (flocons) ;
+  cirrus épaissi 207–207,8 km, `cloudType` 0.10, 3.2·10⁻⁴ (ondulation douce).
+- **Bruit cirrus** : résolu **sans** curl/Worley HF supplémentaire — le
+  sel-et-poivre venait de l'érosion à pleine force, corrigé par l'érosion
+  modulée par genre (note §6). Le voile a une ondulation cellulaire douce.
+
+Résolus plus tôt : la météo statique fournit les mêmes défauts à tous les
+calques (étape 6, surchargés ensuite par calque) ; le regard libre est vérifié
+(mapping directionnel partagé entre `stamp_coverage_map` et le raymarch — un
+trait reste en place quand on tourne/zoome).
 
 ## 13. Références
 

@@ -14,25 +14,25 @@ enum CloudGenus: String, Codable, Sendable, CaseIterable {
     case altocumulus  // moyen, floconneux
     case cumulus      // bas, épais, bourgeonnant
 
-    /// Constantes de la coquille de ce genre. Rayons illustratifs (à caler par
-    /// capture, cf. §12) ; ordonnés en étages disjoints et croissants
+    /// Constantes de la coquille de ce genre, **calées par capture** (session
+    /// 2026-06, cf. `docs/SHELLS.md` §12) ; étages disjoints et croissants
     /// (cumulus < altocumulus < cirrus).
     var shell: ShellSpec {
         switch self {
         case .cirrus:
-            ShellSpec(inner: 207_000, outer: 207_600, cloudType: 0.05,
-                      noiseScale: 6.4e-4, drift: SIMD2(0.030, 0.004))
+            ShellSpec(inner: 207_000, outer: 207_800, cloudType: 0.10,
+                      noiseScale: 3.2e-4, drift: SIMD2(0.030, 0.004))
         case .altocumulus:
-            ShellSpec(inner: 204_000, outer: 205_000, cloudType: 0.45,
-                      noiseScale: 3.9e-4, drift: SIMD2(0.016, 0.006))
+            ShellSpec(inner: 204_200, outer: 204_800, cloudType: 0.35,
+                      noiseScale: 8.0e-4, drift: SIMD2(0.016, 0.006))
         case .cumulus:
             ShellSpec(inner: 201_000, outer: 203_000, cloudType: 0.85,
-                      noiseScale: 3.0e-4, drift: SIMD2(0.010, 0.004))
+                      noiseScale: 6.5e-4, drift: SIMD2(0.010, 0.004))
         }
     }
 }
 
-/// Constantes d'une coquille, dérivées du genre. (Rayons illustratifs.)
+/// Constantes d'une coquille, dérivées du genre.
 ///
 /// `noiseScale` est en **coordonnées planète** (m⁻¹, ordre ~3·10⁻⁴) : le
 /// raymarch coquille opère à `p ≈ 2·10⁵ m` et la référence sample son bruit à

@@ -173,7 +173,7 @@ static inline float2 directionToEquirect(float3 rd) {
 // the height gradient — deliberately NOT the reference's smoothstep(0.6,1.3)
 // coverage window, which would erase the lower half of every stroke (docs/SHELLS.md
 // note "shapeFrom" §6).
-static inline float shapeDensity(float cov, float g, float3 noiseUVW,
+static inline float shapeDensity(float cov, float g, float cloudType, float3 noiseUVW,
                                  texture3d<float> noise) {
     float painted = saturate(cov);
     if (painted <= 0.001f) {
@@ -182,9 +182,13 @@ static inline float shapeDensity(float cov, float g, float3 noiseUVW,
     float4 n = noise.sample(noiseSampler, noiseUVW);
     // The painted coverage shapes the Perlin-Worley base...
     float base = saturate(remap(n.r, 1.0f - painted, 1.0f, 0.0f, 1.0f));
-    // ...and the Worley channels erode the detail.
+    // ...and the Worley channels erode the detail. The erosion strength follows
+    // the genus: a budding cumulus is carved hard by the high-frequency Worley,
+    // a cirrus barely — full-strength erosion turns thin high sheets into
+    // salt-and-pepper speckle instead of a soft veil.
     float detail = n.g * 0.625f + n.b * 0.25f + n.a * 0.125f;
-    float density = remap(base, detail * 0.55f, 1.0f, 0.0f, 1.0f);
+    float erosion = mix(0.18f, 0.55f, cloudType);
+    float density = remap(base, detail * erosion, 1.0f, 0.0f, 1.0f);
     // The vertical profile of this cloud type carves the shell's floor/ceiling.
     return saturate(density) * g;
 }
@@ -307,7 +311,7 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
             }
             float g = densityHeightGradient(hf, cloudType);
             float3 noiseUVW = p * noiseScale + float3(drift.x, drift.y, drift.x);
-            float density = shapeDensity(cov, g, noiseUVW, noise);
+            float density = shapeDensity(cov, g, cloudType, noiseUVW, noise);
             if (density <= 0.001f) {
                 continue;
             }
@@ -330,7 +334,7 @@ fragment float4 cloud_fragment(CloudInOut in [[stage_in]],
                                       + sh.drift.z);
                 float qg = densityHeightGradient(qHf, cloudType);
                 float3 qUVW = q * noiseScale + float3(drift.x, drift.y, drift.x);
-                opticalDepth += shapeDensity(qCov, qg, qUVW, noise) * lightStep;
+                opticalDepth += shapeDensity(qCov, qg, cloudType, qUVW, noise) * lightStep;
             }
 
             // Multiple-scattering approximation (Hillaire / Wrenninge octaves):
