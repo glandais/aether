@@ -13,10 +13,11 @@ une poignée de gestes et de sliders.
 
 ## L'expérience
 
-- **Peinture de nuages** : silhouettes peintes au doigt, **dans plusieurs
-  directions du ciel** → champ de densité 3D raymarché (Perlin-Worley,
-  Beer-Lambert, Henyey-Greenstein, multi-scattering), pinceau réglable (rayon /
-  adoucissement), annuler / rétablir.
+- **Peinture de nuages** : silhouettes peintes au doigt, déposées **par direction
+  du ciel** dans des **calques d'altitude** (cumulus, altocumulus, cirrus) —
+  des coquilles sphériques concentriques raymarchées (Perlin-Worley,
+  Beer-Lambert, Henyey-Greenstein, multi-scattering). Pinceau réglable (rayon /
+  adoucissement), visibilité et opacité par calque, annuler / rétablir.
 - **Ciel physique** : fond atmosphérique (Rayleigh + Mie) qui suit le soleil ;
   soleil, lune **phasée** et étoiles (Bright Star Catalog) dessinés dans le ciel,
   occlus par les nuages.

@@ -222,7 +222,9 @@ for (uint L = 0; L < u.layerCount; ++L) {           // ordre fixe = altitude cro
             // … éclairage actuel conservé : octaves de multiple-scattering,
             //   dualPhase(HG), powder, sunColor/skyAmbient injectés du CPU.
             //   Marche de lumière BORNÉE à la coquille courante (auto-ombrage
-            //   seul, décision §11) ; elle réutilise `cov` (constant par pixel).
+            //   seul, décision §11) ; as-built, elle RÉ-ÉCHANTILLONNE la
+            //   couverture à chaque pas de lumière (cf. §8 — `cov` constant
+            //   rendait tout trait pitch-black).
             // accumulation transmittance/scattered PARTAGÉE entre calques :
             // un cirrus translucide laisse voir le cumulus dessous.
         }
@@ -268,11 +270,12 @@ venait du volume peint).
   3D (qui varie en `p`). Récupérable en samplant la couverture à la direction de
   `p` plutôt que `rd`, au coût d'un sample/pas. **Défaut : `rd` (constant), à
   comparer par capture à l'étape 3.**
-- **Couverture constante dans la marche de lumière** : la référence sample
-  `weather` à chaque pas de lumière (`Sky.metal:601`) ; en directionnel-constant
-  le rayon de lumière « ne voit pas » qu'il sort du nuage peint — auto-ombrage
-  légèrement faux en bord de trait. Même arbitrage que la parallaxe (sampler la
-  couverture à `normalize(q)` par pas de lumière si la capture l'exige).
+- **Couverture dans la marche de lumière — tranché par capture (étape 3)** :
+  avec `cov` constant par pixel, le rayon de lumière voyait partout la couverture
+  pleine et tout trait lisait noir. **As-built, la marche de lumière
+  ré-échantillonne la couverture à la direction de chaque pas** (l'option offerte
+  ici, analogue au sample `weather` par pas de la référence, `Sky.metal:601`).
+  Le rayon de **vue**, lui, garde son sample unique.
 - **Pas d'ombrage croisé entre coquilles** (décision §11) : un cirrus dense
   n'assombrit pas le cumulus dessous ; chaque coquille ne s'ombre qu'elle-même.
 - **Stamp purement additif** (`max`), pas de gomme en v2 : seul l'undo retire de
@@ -325,8 +328,9 @@ ouverte à de vraies migrations futures. Voir `docs/PERSISTENCE.md`.
 - **Sous l'horizon** : les points de trait sous l'élévation 0 ne déposent rien ;
   pas de clamp, pas de marge négative dans la carte (§5).
 - **Ombrage croisé** : auto-ombrage seul — la marche de lumière est bornée à la
-  coquille courante, comme le light march actuel borné au cube. À réévaluer par
-  capture à l'étape 4 si l'empilement paraît faux.
+  coquille courante (elle ré-échantillonne la couverture par pas, cf. §8).
+  Réévalué par capture à l'étape 4 : l'empilement cirrus + cumulus reste
+  plausible sans ombrage croisé.
 - **Effacement** : rien en v2 — pas de gomme, pas de « vider le calque » ;
   undo/redo (instantané de `layers`) suffit. À revoir à l'usage.
 - **Paramétrisation de la carte** : équirect hémisphère sup. uniquement,
@@ -335,23 +339,29 @@ ouverte à de vraies migrations futures. Voir `docs/PERSISTENCE.md`.
   (comportement de la référence, `p.x += time` dans `density()` seulement) — le
   nuage bouillonne sur place, il ne s'enfuit pas.
 
-## 12. Restent à caler par capture
+## 12. Restent à caler (capture / device)
 
-- **Rayons/épaisseurs par genre** : valeurs §4 illustratives (séparation visible
-  des étages, convergence à l'horizon).
-- **`noiseScale` par genre** : ordre de grandeur fixé (~3·10⁻⁴, §4), ratios à
-  affiner.
-- **Parallaxe** : couverture en `rd` (défaut) vs en `p` (1 sample/pas) — même
-  arbitrage pour la marche de lumière (§8). Capture comparative à l'étape 3.
-- **Météo multi-calques** (étape 6) : défaut proposé — `WeatherSnapshot` fournit
-  les mêmes `coverageBias`/`opacity` par défaut à tous les calques, ajustables
-  ensuite par calque ; affiner si un modulage par genre s'avère nécessaire.
-- **Regard libre** : on garde yaw/pitch ; le regard ne crée plus de domaine — la
-  cohérence peinture/rendu repose sur le mapping directionnel partagé entre
-  `stamp` et raymarch ; à vérifier en peignant puis tournant le regard.
-- **Bruit cirrus** : la RGBA Perlin-Worley seule suffira-t-elle ? Sinon, érosion
-  Worley HF + curl de la référence (étape 4, raffinement optionnel).
-- **Nombre de calques** : `maxCount = 4` suffisant ? (cirrus / alto / cumulus +1.)
+- **Rayons/épaisseurs par genre** : valeurs §4 toujours illustratives (séparation
+  visible des étages, convergence à l'horizon).
+- **`noiseScale` par genre** : ordre de grandeur planète acquis (~3·10⁻⁴, §4),
+  ratios à affiner.
+- **`kSigma` (extinction)** : recalé en unités **par mètre** (0.0045) à
+  l'étape 3 — les pas planète font des centaines de mètres, la valeur des cubes
+  (11.0) saturait l'opacité en un pas. À confirmer sur device.
+- **Parallaxe du rayon de vue** : couverture en `rd` (constante/pixel, défaut
+  conservé) vs en `p` (1 sample/pas). La marche de **lumière** ré-échantillonne
+  déjà par pas (§8) ; seul le rayon de vue reste à arbitrer si l'horizon manque
+  d'étirement.
+- **Bruit cirrus** : jugé acceptable à l'étape 4 sans érosion curl/Worley HF ;
+  à reconsidérer si un cirrus plus fibreux est souhaité (`Sky.metal:556-562`).
+- **Nombre de calques** : `maxCount = 4` (cirrus / alto / cumulus +1) — suffisant
+  jusqu'à preuve du contraire.
+- **Perf sur device réel** : non profilée (simulateur fluide, non représentatif).
+
+Résolus depuis : la météo statique fournit les mêmes défauts à tous les calques
+(étape 6, surchargés ensuite par calque) ; le regard libre est vérifié (mapping
+directionnel partagé entre `stamp_coverage_map` et le raymarch — un trait reste
+en place quand on tourne/zoome).
 
 ## 13. Références
 
@@ -360,7 +370,8 @@ ouverte à de vraies migrations futures. Voir `docs/PERSISTENCE.md`.
   gradients de hauteur `:511-525`, fenêtre de couverture `:552`, érosion
   curl/Worley HF `:556-562`, light march cône `:599-610`, pas borné `dmod`
   `:663-664`.
-- `docs/PIPELINE.md` — pipeline de rendu actuel (cubes).
+- `docs/PIPELINE.md` — pipeline de rendu (section « Calques multi-coquilles »
+  pour l'as-built).
 - `BIBLIO.md` — papers (Schneider/Nubis, HZD, scattering).
 - Code remplacé : `Aether/Domain/CloudCube.swift`,
   `Aether/Rendering/Shaders/BrushPaint.metal`, `…/Cloud.metal`,

@@ -47,8 +47,9 @@ rechargé n'hérite **pas** des défauts courants (il garde son opacité/visibil
 
 - **Pas de rétrocompatibilité** (décision actée, `SHELLS.md` §10/§11) : l'app
   n'étant pas publiée, le schéma a fait un **bump franc 1 → 2** sans migration.
-- Un fichier `version < 2` (cubes) est **refusé proprement** : `decode(from:)`
-  lit d'abord la seule `version` puis lève `AetherDocumentError.unsupportedVersion`
+- Un fichier d'une **autre version** — v1 (cubes) comme un schéma postérieur
+  (futur v3) — est **refusé proprement** : `decode(from:)` lit d'abord la seule
+  `version` puis lève `AetherDocumentError.unsupportedVersion`
   — pas de crash, pas de document à moitié chargé. La galerie affiche un message
   sobre localisé (`gallery.openErrorVersion`, fr + en) ; un contenu illisible
   (JSON corrompu, version absente) donne `AetherDocumentError.corrupted` et le
@@ -109,19 +110,19 @@ Notes :
   dès la première frame — pas d'image transitoire.
 - **`CanvasModel.load(layers:…)`** remplace les calques et l'orientation et
   réinitialise l'historique (pas d'annulation à travers un chargement). Les
-  surcharges par calque sont posées telles quelles ; le rendu cube encore visible
-  (jusqu'au nettoyage de l'étape 8 du plan multi-coquilles) est reconstruit depuis
-  les traits des calques, chaque `BrushStroke` portant sa `StrokeCamera`.
+  surcharges par calque sont posées telles quelles ; la couverture est **re-cuite
+  dans l'atlas** (`CoverageBaker`) depuis les traits des calques, chaque
+  `BrushStroke` portant sa `StrokeCamera`.
 
 ## Vérification
 
 - **Test unitaire** `AetherDocumentTests` (`Tests/AetherTests`) : capture → JSON
   → décodage → reconstruction ; assertions sur l'égalité des **calques** (genre,
   traits, surcharges météo, visibilité), des surcharges d'instant/lieu, de la
-  scène, des paramètres de rendu et des dimensions de l'image embarquée. Un test
-  vérifie aussi le **refus** d'un fichier `version: 1` avec
-  `unsupportedVersion(found: 1)`, et un autre que `load(layers:)` n'écrase pas les
-  surcharges par calque avec les défauts météo d'une scène différente.
+  scène, des paramètres de rendu et des dimensions de l'image embarquée. Des tests
+  vérifient aussi le **refus** d'un fichier `version: 1` (et d'un futur
+  `version: 3`) avec `unsupportedVersion(found:)`, et que `load(layers:)` n'écrase
+  pas les surcharges par calque avec les défauts météo d'une scène différente.
 - **Vérification visuelle** sur simulateur : peindre, régler l'heure / le zoom,
   **Enregistrer** vers `Files` ; relancer, **Ouvrir un ciel** depuis la galerie,
   comparer la capture à celle d'avant sauvegarde.

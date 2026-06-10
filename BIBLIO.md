@@ -208,7 +208,7 @@ d'une estimation monoculaire (galerie curée / photo sans LiDAR via CoreML).
 |---|---|---|
 | [clayjohn/godot-volumetric-cloud-demo](https://github.com/clayjohn/godot-volumetric-cloud-demo) | Godot sky shader | Implémentation lisible basée Schneider HZD. [Shader direct](https://github.com/clayjohn/godot-volumetric-cloud-demo/blob/main/clouds.gdshader). |
 | [clayjohn/godot-volumetric-cloud-demo-v2](https://github.com/clayjohn/godot-volumetric-cloud-demo-v2) | Godot 4.2+ compute | V2 avec compute shaders (génération bruit) + sky shader. |
-| [clayjohn/realtime_clouds](https://github.com/clayjohn/realtime_clouds) | OpenGL/C++ | Expérimentation visant le matériel bas de gamme. |
+| [clayjohn/realtime_clouds](https://github.com/clayjohn/realtime_clouds) | OpenGL/C++ | **Référence du modèle coquilles d'Aether** (cf. [`docs/SHELLS.md`](docs/SHELLS.md)) : couche sphérique HZD autour d'une « petite planète ». Port Metal local : `~/code/other/realtime_clouds/ios`. |
 | [adrianderstroff/realtime-clouds](https://github.com/adrianderstroff/realtime-clouds) | OpenGL/Go | Reproduction du renderer Horizon: Zero Dawn. |
 | [AmanSachan1/Meteoros](https://github.com/AmanSachan1/Meteoros) | Vulkan | Cloudscape temps réel d'après Decima/Nubis. |
 | [iamzhai/RealTimeVolumetricClouds](https://github.com/iamzhai/RealTimeVolumetricClouds) | Unity | Compilation de méthodes issues de la littérature. |

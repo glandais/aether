@@ -35,7 +35,7 @@ complexe — une poignée de sliders au maximum.
 - **Swift Concurrency** (async/await, actors) — **pas de Combine, pas de RxSwift**
 - **SwiftPM uniquement**, pas de CocoaPods
 - **Tests** : XCTest + Swift Testing pour le métier (astro, météo→nuage,
-  brush→volume)
+  calques/persistance)
 
 ### Outillage projet
 
