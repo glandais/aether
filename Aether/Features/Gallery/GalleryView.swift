@@ -14,11 +14,9 @@ struct GalleryView: View {
     @State private var openError: OpenError?
 
     /// Cas d'échec d'ouverture, chacun avec son message localisé sobre.
-    private enum OpenError: Int, Identifiable {
+    private enum OpenError: Error {
         case unreadable
         case unsupportedVersion
-
-        var id: Int { rawValue }
 
         var messageKey: String.LocalizationValue {
             switch self {
@@ -68,29 +66,66 @@ struct GalleryView: View {
                     openError = .unreadable
                 }
             }
-            .alert(item: $openError) { error in
-                Alert(title: Text(String(localized: error.messageKey, table: "Aether")))
+            .alert(
+                openErrorMessage,
+                isPresented: isShowingOpenError
+            ) {
+                // Aucune action explicite : le système ajoute un bouton de
+                // fermeture par défaut, comme l'ancien `Alert(title:)`.
             }
         }
     }
 
-    /// Décode un fichier `.aether` et reconstruit la scène + l'état du canvas.
-    /// L'URL est protégée (sandbox) : accès délimité le temps de la lecture.
+    /// Titre de l'alerte : message localisé de l'échec courant (chaîne vide quand
+    /// aucune alerte n'est présentée — le titre n'est alors pas affiché).
+    private var openErrorMessage: String {
+        openError.map { String(localized: $0.messageKey, table: "Aether") } ?? ""
+    }
+
+    /// Passerelle `Bool` pilotant la présentation de l'alerte depuis `openError` :
+    /// la fermeture (système) remet l'échec à `nil`.
+    private var isShowingOpenError: Binding<Bool> {
+        Binding(
+            get: { openError != nil },
+            set: { presented in
+                if !presented { openError = nil }
+            }
+        )
+    }
+
+    /// Décode un fichier `.aether` et reconstruit la scène + l'état du canvas. La
+    /// lecture s'effectue hors de l'acteur principal (cf. `load(_:)`) ; seul le
+    /// résultat (sélection ou échec) est appliqué sur le fil principal.
     private func open(_ url: URL) {
+        Task {
+            switch await Self.load(url) {
+            case .success(let loaded):
+                onSelect(loaded.context, loaded.restored)
+            case .failure(let error):
+                openError = error
+            }
+        }
+    }
+
+    /// Lit et décode le fichier `.aether` **hors de l'acteur principal** : un
+    /// fichier iCloud Drive non téléchargé peut bloquer longtemps, ce qui figerait
+    /// l'UI si la lecture se faisait sur le fil principal. L'accès sandbox encadre
+    /// la lecture dans ce même contexte d'exécution. Renvoie l'échec typé le cas
+    /// échéant (illisible vs version incompatible), identique à l'ancien code.
+    private nonisolated static func load(_ url: URL) async -> sending Result<LoadedScene, OpenError> {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
             let data = try Data(contentsOf: url)
             let document = try AetherDocument.decode(from: data)
             guard let loaded = document.makeLoaded() else {
-                openError = .unreadable
-                return
+                return .failure(.unreadable)
             }
-            onSelect(loaded.context, loaded.restored)
+            return .success(loaded)
         } catch AetherDocumentError.unsupportedVersion {
-            openError = .unsupportedVersion
+            return .failure(.unsupportedVersion)
         } catch {
-            openError = .unreadable
+            return .failure(.unreadable)
         }
     }
 }
