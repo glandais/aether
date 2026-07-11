@@ -159,6 +159,15 @@ final class CanvasModel {
         layers[li].opacity = opacity
     }
 
+    /// Opacité du calque d'un genre (1 par défaut si l'étage est vierge), exposée
+    /// en subscript pour un `Binding` naturel via `@Bindable` (`$model[opacityFor:]`).
+    /// L'écriture délègue à `setOpacity`, sans instantané d'historique (celui-ci
+    /// reste piloté à part par `snapshotForOpacity` au début du glissement).
+    subscript(opacityFor genus: CloudGenus) -> Float {
+        get { layer(for: genus)?.opacity ?? 1 }
+        set { setOpacity(newValue, for: genus) }
+    }
+
     func clear() {
         guard !layers.isEmpty else { return }
         recordHistory()

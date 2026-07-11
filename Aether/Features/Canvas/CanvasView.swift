@@ -8,7 +8,7 @@ import simd
 /// éclairées selon le lieu/cadrage de la scène et l'heure choisie (le curseur
 /// déplace le soleil et la lune ; le nuage se rallume en conséquence).
 /// Sens du défilement automatique du temps (exclusif : un seul actif).
-private enum AutoPlay {
+enum AutoPlay {
     case none, forward, backward
 
     /// Signe du sens (`0` si inactif) ; la vitesse est portée à part.
@@ -74,6 +74,11 @@ struct CanvasView: View {
     /// Document préparé pour l'export, et présentation du sélecteur de fichier.
     @State private var saveDocument: AetherDocument?
     @State private var showSaveExporter = false
+    /// Mémoïse la part coûteuse (astro-dépendante) de l'éclairage : recalculée
+    /// seulement au changement d'heure/lieu, pas à chaque `body` (trait, réglage,
+    /// rotation). Classe non observable → l'appeler depuis `body` ne crée pas de
+    /// dépendance d'invalidation.
+    @State private var lightCache = AstroLightCache()
 
     /// Construit la vue, éventuellement réamorcée depuis un fichier `.aether`
     /// rechargé : les traits, le regard, le pinceau et les surcharges
@@ -109,9 +114,8 @@ struct CanvasView: View {
     private static let maxFieldOfView = 1.75
 
     /// Vitesse de base du défilement automatique (heures par seconde réelle) au
-    /// multiplicateur 1×, et multiplicateurs disponibles (cycliques).
+    /// multiplicateur 1×. Les multiplicateurs cycliques vivent dans `TimeBar`.
     private static let baseHoursPerSecond = 0.25
-    private static let autoPlaySpeeds = [1, 2, 4, 8, 16]
 
     // Dépendances exposées via leur protocole (cf. CLAUDE.md : SwiftAA / tzf
     // cachés derrière une abstraction pour la testabilité). `SwiftAAAstroService`
@@ -122,21 +126,6 @@ struct CanvasView: View {
     private let atmosphere = Atmosphere.earth
     @State private var timeZoneService: TimeZoneService = TzfTimeZoneService()
     @State private var locationService = CoreLocationService()
-
-    // Échelles ramenant la radiance atmosphérique dans la plage de travail du
-    // nuage (réglées par capture). La couleur/teinte vient de l'atmosphère ; ces
-    // facteurs ne font que caler la luminosité.
-    private static let cloudSunStrength: Float = 12
-    private static let cloudAmbientStrength: Float = 1.2
-    /// Désaturation de l'ambiance bleue du ciel (0 = gris, 1 = bleu ciel pur),
-    /// pour éviter que le corps du nuage ne vire au gris-bleu.
-    private static let ambientSaturation: Float = 0.5
-    /// Luminosités des disques solaire/lunaire dessinés dans le ciel (réglées par
-    /// capture). Le soleil sature vers le blanc ; la lune reste tamisée.
-    private static let sunDiscBrightness: Float = 1.3
-    private static let moonDiscBrightness: Float = 0.9
-    /// Blanc froid du disque lunaire (la phase/teinte vient de la géométrie).
-    private static let moonDiscTint = SIMD3<Float>(0.85, 0.88, 1.0)
 
     /// Panneau d'outil ouvert. Exclusif : un seul à la fois, pour ne pas
     /// encombrer le ciel ni déborder en paysage. `paint` réunit la peinture
@@ -188,7 +177,9 @@ struct CanvasView: View {
             if showOptions && !chromeHidden {
                 VStack(spacing: 14) {
                     Spacer()
-                    timeBar(isDaytime: light.isDaytime)
+                    TimeBar(
+                        hour: hourBinding, isDaytime: light.isDaytime, timeLabel: timeLabel,
+                        autoPlay: $autoPlay, autoPlaySpeed: $autoPlaySpeed)
                 }
                 .padding(.bottom, 28)
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -470,79 +461,41 @@ struct CanvasView: View {
     }
 
     /// Soleil le jour, lune la nuit (fondu au crépuscule), calé sur l'exposition.
+    /// La moitié coûteuse (positions astro + intégrales de ciel) est mémoïsée dans
+    /// `lightCache` (invariante tant que l'heure/le lieu ne bougent pas) ; seule la
+    /// part « regard » (mélange des directions caméra) est recalculée ici à chaque
+    /// `body`, car elle suit le lacet/tangage.
     private var resolvedLight: ResolvedLight {
-        let date = effectiveDate
-        let coordinate = effectiveCoordinate
-        let sun = astro.position(of: .sun, at: coordinate, date: date)
-        let moon = astro.position(of: .moon, at: coordinate, date: date)
-        let illumination = astro.moonIlluminatedFraction(date: date)
-
-        // 1 quand le soleil est levé, 0 la nuit ; fondu dans la bande crépusculaire.
-        let sunWeight = SkyLighting.smoothstep(-0.08, 0.06, Float(sun.altitude))
-        let moonLight = MoonLighting(moonAltitude: moon.altitude, illuminatedFraction: illumination)
+        let cached = lightCache.resolved(
+            date: effectiveDate, coordinate: effectiveCoordinate,
+            astro: astro, atmosphere: atmosphere, exposure: context.skyExposure)
 
         // Le regard de l'utilisateur (lacet + tangage) s'ajoute à l'attitude de
         // la scène : le soleil/la lune tournent dans le repère caméra comme le
         // ciel (cohérence via la base partagée, cf. `CameraPose`).
         let gazeHeading = context.scene.heading + Double(model.viewYaw)
         let gazePitch = context.scene.pitch + Double(model.viewPitch)
-        let sunDir = sun.cameraDirection(
+        let sunDir = cached.sunPosition.cameraDirection(
             heading: gazeHeading, pitch: gazePitch, roll: context.scene.roll)
-        let moonDir = moon.cameraDirection(
+        let moonDir = cached.moonPosition.cameraDirection(
             heading: gazeHeading, pitch: gazePitch, roll: context.scene.roll)
-        var direction = moonDir + (sunDir - moonDir) * sunWeight
+        var direction = moonDir + (sunDir - moonDir) * cached.sunWeight
         // Soleil et lune opposés : le mélange peut s'annuler → repli sur le dominant.
-        direction = length(direction) < 0.01 ? (sunWeight >= 0.5 ? sunDir : moonDir) : normalize(direction)
-
-        // Éclairage du nuage dérivé de la **même** atmosphère que le ciel :
-        // soleil = transmittance solaire (chaud bas, blanc haut, nul la nuit) ;
-        // ambiance = radiance du ciel au zénith (bleue le jour), désaturée pour
-        // garder un nuage clair plutôt que gris-bleu.
-        let sunWorld = sun.worldDirection
-        let sunDayColor = atmosphere.sunTransmittance(sunDirection: sunWorld) * Self.cloudSunStrength
-        let zenith = atmosphere.skyRadiance(viewDirection: SIMD3(0, 1, 0), sunDirection: sunWorld)
-        // Radiance du ciel près de l'horizon, dans l'azimut du soleil (pour la
-        // chaleur du reflet bas), avec repli vers le Nord si le soleil est haut.
-        let sunHoriz = SIMD3<Float>(sunWorld.x, 0, sunWorld.z)
-        let horizonDir = length(sunHoriz) > 0.05
-            ? normalize(SIMD3<Float>(sunHoriz.x, 0.08, sunHoriz.z))
-            : SIMD3<Float>(0, 0.08, -1)
-        let horizonRadiance = atmosphere.skyRadiance(viewDirection: horizonDir, sunDirection: sunWorld)
-        let zenithLuma = 0.2126 * zenith.x + 0.7152 * zenith.y + 0.0722 * zenith.z
-        let ambientDayColor =
-            (SIMD3(repeating: zenithLuma) + (zenith - SIMD3(repeating: zenithLuma)) * Self.ambientSaturation)
-            * Self.cloudAmbientStrength
-
-        let exposure = context.skyExposure
-        let color = (sunDayColor * sunWeight + moonLight.color * (1 - sunWeight)) * exposure
-        let ambient = (ambientDayColor * sunWeight + moonLight.ambient * (1 - sunWeight)) * exposure
-
-        // Sol éclairé par le jour, avec un plancher lunaire (pas de bande claire
-        // sous un ciel noir de minuit).
-        let moonLuma = 0.2126 * moonLight.color.x + 0.7152 * moonLight.color.y + 0.0722 * moonLight.color.z
-        let groundLight = max(sunWeight, min(moonLuma * 0.06, 0.15), 0.02)
-
-        // Couleurs des disques. Le soleil réutilise la transmittance solaire
-        // (chaude bas, blanche haut, nulle sous l'horizon → disque qui s'éteint
-        // seul). La lune est un blanc froid atténué par son altitude ; la phase
-        // (croissant/gibbeuse) est calculée côté shader, donc pas de produit par
-        // la fraction éclairée ici.
-        let sunDiscColor = atmosphere.sunTransmittance(sunDirection: sunWorld)
-            * exposure * Self.sunDiscBrightness
-        let moonAltitudeFade = SkyLighting.smoothstep(-0.02, 0.05, Float(moon.altitude))
-        let moonDiscColor = Self.moonDiscTint * (moonAltitudeFade * Self.moonDiscBrightness)
+        direction = length(direction) < 0.01
+            ? (cached.sunWeight >= 0.5 ? sunDir : moonDir) : normalize(direction)
 
         return ResolvedLight(
-            direction: direction, skySunDirection: sun.worldDirection,
-            sunDiscColor: sunDiscColor, moonDiscColor: moonDiscColor,
-            color: color, ambient: ambient, groundLight: groundLight, isDaytime: sunWeight >= 0.5,
-            moonSkyDirection: moon.worldDirection,
-            moonGlint: moonLight.color * exposure,
-            nightWeight: 1 - sunWeight,
-            skyZenithRadiance: zenith,
-            skyHorizonRadiance: horizonRadiance,
-            sunPosition: sun,
-            moonPosition: moon)
+            direction: direction, skySunDirection: cached.skySunDirection,
+            sunDiscColor: cached.sunDiscColor, moonDiscColor: cached.moonDiscColor,
+            color: cached.color, ambient: cached.ambient, groundLight: cached.groundLight,
+            isDaytime: cached.isDaytime,
+            moonSkyDirection: cached.moonSkyDirection,
+            moonGlint: cached.moonGlint,
+            nightWeight: cached.nightWeight,
+            skyZenithRadiance: cached.skyZenithRadiance,
+            skyHorizonRadiance: cached.skyHorizonRadiance,
+            sunPosition: cached.sunPosition,
+            moonPosition: cached.moonPosition)
     }
 
     /// FOV effectif : valeur pincée si présente, sinon celui de la scène.
@@ -701,67 +654,10 @@ struct CanvasView: View {
         return "\(lat), \(lon)"
     }
 
-    /// Curseur d'heure, encadré par deux bascules de défilement automatique
-    /// (recul / avance, mutuellement exclusives) : déplace le soleil/la lune, le
-    /// nuage se rallume.
-    private func timeBar(isDaytime: Bool) -> some View {
-        let hour = Binding(
-            get: { currentHour },
-            set: { hourOverride = $0 }
-        )
-        return HStack(spacing: 12) {
-            Image(systemName: isDaytime ? "sun.max" : "moon.stars")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            autoPlayButton(.backward, icon: "backward.fill", label: "time.rewind")
-            Slider(value: hour, in: 0...24)
-                .tint(.white.opacity(0.55))
-            autoPlayButton(.forward, icon: "forward.fill", label: "time.advance")
-            speedButton
-            Text(timeLabel)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 44, alignment: .trailing)
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .background(.ultraThinMaterial, in: Capsule())
-        // Cape la largeur : en paysage le curseur resterait sinon collé aux bords.
-        .frame(maxWidth: 520)
-        .padding(.horizontal, 24)
-    }
-
-    /// Bascule de défilement automatique (recul ou avance). Réactiver le même
-    /// sens l'arrête ; activer l'autre bascule de sens (exclusion mutuelle).
-    private func autoPlayButton(
-        _ mode: AutoPlay, icon: String, label: String.LocalizationValue
-    ) -> some View {
-        Button {
-            autoPlay = (autoPlay == mode) ? .none : mode
-        } label: {
-            Image(systemName: icon)
-                .font(.footnote)
-                .foregroundStyle(autoPlay == mode ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(Text(String(localized: label, table: "Aether")))
-    }
-
-    /// Règle la vitesse de défilement : cycle 1× → 2× → 4× → 8× → 16× → 1×.
-    private var speedButton: some View {
-        Button {
-            let speeds = Self.autoPlaySpeeds
-            let index = speeds.firstIndex(of: autoPlaySpeed) ?? 0
-            autoPlaySpeed = speeds[(index + 1) % speeds.count]
-        } label: {
-            Text(verbatim: "\(autoPlaySpeed)×")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(autoPlay == .none ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tint))
-                .frame(width: 30, alignment: .trailing)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(Text(String(localized: "time.speed", table: "Aether")))
-        .accessibilityValue(Text(verbatim: "\(autoPlaySpeed)×"))
+    /// Liaison d'heure locale (heures décimales) : lit l'heure effective, écrit
+    /// la surcharge. Passée à `TimeBar`.
+    private var hourBinding: Binding<Double> {
+        Binding(get: { currentHour }, set: { hourOverride = $0 })
     }
 
     /// Avance (signe positif) ou recule l'heure courante de `hours`, en
@@ -889,7 +785,7 @@ extension CanvasView {
     fileprivate func panelContent(_ panel: ToolPanel, light: ResolvedLight) -> some View {
         switch panel {
         case .paint:
-            paintPanel
+            PaintPanel(model: model)
         case .more:
             // Réglages contextuels (rares par geste) : ciel (centrer soleil/lune,
             // éphéméride) et lieu. Les actions qui ouvrent une feuille (carte,
@@ -933,134 +829,6 @@ extension CanvasView {
             // largeur proposée (grand vide à gauche, surtout en paysage).
             .frame(width: 230)
         }
-    }
-
-    /// Panneau « Peinture » : tout le geste de dessin sur une seule carte —
-    /// sélecteur d'étage (visibilité), opacité du calque sélectionné, puis
-    /// réglages de pinceau (rayon, douceur). Sobre, façon éditeur d'images
-    /// minimal. Les étages sont listés du plus haut (cirrus) au plus bas
-    /// (cumulus), comme on les lit dans le ciel ; les réglages de pinceau,
-    /// globaux, suivent sous un filet.
-    private var paintPanel: some View {
-        let active = model.activeGenus
-        return VStack(alignment: .leading, spacing: 14) {
-            ForEach(Self.genusOrder, id: \.self) { genus in
-                genusRow(genus, active: genus == active)
-            }
-            Divider()
-            opacityControl(for: active)
-            Divider()
-            brushSlider(
-                icon: "smallcircle.filled.circle",
-                value: binding(\.brushRadius), range: 0.03...0.25)
-            brushSlider(
-                icon: "drop",
-                value: binding(\.brushSoftness), range: 0...1)
-        }
-        .frame(width: 230)
-    }
-
-    /// Étages affichés, du plus haut au plus bas.
-    private static let genusOrder: [CloudGenus] = [.cirrus, .altocumulus, .cumulus]
-
-    /// Ligne d'un étage : sélection (nom), et — si le calque porte des traits — un
-    /// œil de visibilité. Le nom sélectionne le calque actif (la peinture y va).
-    @ViewBuilder
-    private func genusRow(_ genus: CloudGenus, active: Bool) -> some View {
-        let layer = model.layer(for: genus)
-        HStack(spacing: 10) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.15)) { model.selectGenus(genus) }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: active ? "largecircle.fill.circle" : "circle")
-                        .font(.footnote)
-                        .foregroundStyle(active ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-                    let dimmed = layer?.isVisible == false
-                    Text(Self.genusName(genus))
-                        .font(.callout)
-                        .foregroundStyle(dimmed ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
-                    Spacer(minLength: 0)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityAddTraits(active ? .isSelected : [])
-
-            if let layer {
-                Button {
-                    model.setVisible(!layer.isVisible, for: genus)
-                } label: {
-                    Image(systemName: layer.isVisible ? "eye" : "eye.slash")
-                        .font(.footnote)
-                        .foregroundStyle(layer.isVisible ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-                        .frame(width: 22)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(Text(String(localized: "layer.visibility", table: "Aether")))
-                .accessibilityValue(Text(String(
-                    localized: layer.isVisible ? "layer.visible" : "layer.hidden", table: "Aether")))
-            }
-        }
-    }
-
-    /// Curseur d'opacité du calque sélectionné. Inactif (grisé) tant que l'étage
-    /// est vierge — rien à doser sans matière peinte.
-    @ViewBuilder
-    private func opacityControl(for genus: CloudGenus) -> some View {
-        let layer = model.layer(for: genus)
-        HStack(spacing: 10) {
-            Image(systemName: "circle.lefthalf.filled")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .frame(width: 18)
-            Slider(
-                value: opacityBinding(for: genus),
-                in: 0...1,
-                onEditingChanged: { editing in
-                    // Au début du geste seulement : un instantané d'historique,
-                    // pour que l'annulation revienne à l'opacité d'avant-réglage.
-                    if editing { model.snapshotForOpacity(of: genus) }
-                }
-            )
-            .tint(.white.opacity(0.55))
-            .disabled(layer == nil)
-        }
-        .opacity(layer == nil ? 0.4 : 1)
-        .accessibilityLabel(Text(String(localized: "layer.opacity", table: "Aether")))
-    }
-
-    /// Binding d'opacité du calque : écrit la valeur en continu pendant le geste.
-    /// L'historique est instantané une seule fois au début (`onEditingChanged`).
-    private func opacityBinding(for genus: CloudGenus) -> Binding<Float> {
-        Binding(
-            get: { model.layer(for: genus)?.opacity ?? 1 },
-            set: { model.setOpacity($0, for: genus) }
-        )
-    }
-
-    /// Nom sobre d'un genre (registre atmosphérique).
-    private static func genusName(_ genus: CloudGenus) -> String {
-        switch genus {
-        case .cirrus: String(localized: "layer.cirrus", table: "Aether")
-        case .altocumulus: String(localized: "layer.altocumulus", table: "Aether")
-        case .cumulus: String(localized: "layer.cumulus", table: "Aether")
-        }
-    }
-
-    private func brushSlider(icon: String, value: Binding<Float>, range: ClosedRange<Float>) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .frame(width: 18)
-            Slider(value: value, in: range).tint(.white.opacity(0.55))
-        }
-    }
-
-    /// Binding vers une propriété du `CanvasModel` (@Observable via @State).
-    private func binding(_ keyPath: ReferenceWritableKeyPath<CanvasModel, Float>) -> Binding<Float> {
-        Binding(get: { model[keyPath: keyPath] }, set: { model[keyPath: keyPath] = $0 })
     }
 
     fileprivate func editButton(
