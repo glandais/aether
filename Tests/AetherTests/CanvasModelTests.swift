@@ -3,6 +3,13 @@ import Foundation
 import simd
 @testable import Aether
 
+/// Tous les traits du modèle, aplatis — l'app n'expose plus que `hasStrokes`
+/// (pas d'allocation par évaluation de body) ; les tests gardent la vue à plat
+/// pour compter les traits à travers les calques.
+extension CanvasModel {
+    var allStrokes: [BrushStroke] { layers.flatMap(\.strokes) }
+}
+
 /// Valide l'historique annuler/rétablir du canvas (granularité : un trait).
 @MainActor
 struct CanvasModelTests {
@@ -19,16 +26,16 @@ struct CanvasModelTests {
         model.beginStroke(at: SIMD2(0.5, 0.5), camera: Self.testCamera)
         model.extendStroke(to: SIMD2(0.6, 0.5))
         model.endStroke()
-        #expect(model.strokes.count == 1)
+        #expect(model.allStrokes.count == 1)
         #expect(model.canUndo)
         #expect(!model.canRedo)
 
         model.undo()
-        #expect(model.strokes.isEmpty)
+        #expect(model.allStrokes.isEmpty)
         #expect(model.canRedo)
 
         model.redo()
-        #expect(model.strokes.count == 1)
+        #expect(model.allStrokes.count == 1)
         #expect(!model.canRedo)
     }
 
@@ -43,7 +50,7 @@ struct CanvasModelTests {
         model.beginStroke(at: SIMD2(0.2, 0.2), camera: Self.testCamera)
         model.endStroke()
         #expect(!model.canRedo)
-        #expect(model.strokes.count == 1)
+        #expect(model.allStrokes.count == 1)
     }
 
     @Test("L'effacement est annulable")
@@ -53,13 +60,13 @@ struct CanvasModelTests {
         model.endStroke()
         model.beginStroke(at: SIMD2(0.3, 0.3), camera: Self.testCamera)
         model.endStroke()
-        #expect(model.strokes.count == 2)
+        #expect(model.allStrokes.count == 2)
 
         model.clear()
-        #expect(model.strokes.isEmpty)
+        #expect(model.allStrokes.isEmpty)
 
         model.undo()
-        #expect(model.strokes.count == 2)
+        #expect(model.allStrokes.count == 2)
     }
 
     @Test("Un trait conserve la pose caméra du moment où il a été peint")
@@ -70,7 +77,7 @@ struct CanvasModelTests {
             tanHalfFov: 0.4, aspect: 1.5)
         model.beginStroke(at: SIMD2(0.5, 0.5), camera: camera)
         model.endStroke()
-        #expect(model.strokes.first?.camera == camera)
+        #expect(model.allStrokes.first?.camera == camera)
     }
 
     @Test("Le tangage est clampé, le lacet est libre")

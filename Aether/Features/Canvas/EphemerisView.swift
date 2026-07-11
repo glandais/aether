@@ -1,5 +1,14 @@
 import SwiftUI
 
+/// Charge figée d'une présentation d'éphéméride : l'éphéméride et son fuseau,
+/// calculés au moment où l'utilisateur ouvre la feuille. Présentée via
+/// `.sheet(item:)`, elle ne se recalcule pas tant que la feuille reste ouverte.
+struct EphemerisPresentation: Identifiable {
+    let id = UUID()
+    let ephemeris: Ephemeris
+    let timeZone: TimeZone
+}
+
 /// Éphéméride du lieu et du jour courants : lever / coucher du Soleil et de la
 /// Lune (heure locale), phase et visibilité de la Lune. Feuille sobre.
 struct EphemerisView: View {
@@ -70,13 +79,21 @@ struct EphemerisView: View {
         }
     }
 
+    /// Formateur « HH:mm » 24 h réutilisé (le fuseau est réglé à chaque appel —
+    /// sûr car cantonné au main thread). Éviter d'allouer un `DateFormatter` par
+    /// ligne d'éphéméride.
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
+
     /// Heure locale « HH:mm », ou « — » si l'astre ne franchit pas l'horizon ce jour.
     private func time(_ date: Date?) -> String {
         guard let date else { return "—" }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
+        let formatter = Self.timeFormatter
         formatter.timeZone = timeZone
-        formatter.dateFormat = "HH:mm"
         return formatter.string(from: date)
     }
 

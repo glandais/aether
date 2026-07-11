@@ -39,8 +39,9 @@ struct CanvasView: View {
     /// Fuseau résolu (tzf) pour le lieu choisi. `nil` = fuseau d'origine.
     @State private var timeZoneOverride: TimeZone?
     @State private var showLocationPicker = false
-    /// Feuille d'éphéméride (lever/coucher, phase) ouverte.
-    @State private var showEphemeris = false
+    /// Éphéméride présentée (lever/coucher, phase). Figée à l'ouverture : la
+    /// feuille ne se recalcule pas à chaque tick de défilement derrière elle.
+    @State private var ephemerisPresentation: EphemerisPresentation?
     /// Résolution « ici & maintenant » en cours (position GPS + fuseau).
     @State private var isResolvingHereNow = false
     /// Défilement automatique du temps (aucun / avance / recul). Exclusif.
@@ -113,11 +114,14 @@ struct CanvasView: View {
     private static let autoPlaySpeeds = [1, 2, 4, 8, 16]
 
     // Dépendances exposées via leur protocole (cf. CLAUDE.md : SwiftAA / tzf
-    // cachés derrière une abstraction pour la testabilité).
+    // cachés derrière une abstraction pour la testabilité). `SwiftAAAstroService`
+    // est une struct sans état ; les services **avec** état (fuseau tzf à cache
+    // paresseux, `CLLocationManager`) vivent en `@State` pour persister à travers
+    // les ré-inits de la vue au lieu d'être réalloués à chaque fois.
     private let astro: AstroService = SwiftAAAstroService()
     private let atmosphere = Atmosphere.earth
-    private let timeZoneService: TimeZoneService = TzfTimeZoneService()
-    private let locationService = CoreLocationService()
+    @State private var timeZoneService: TimeZoneService = TzfTimeZoneService()
+    @State private var locationService = CoreLocationService()
 
     // Échelles ramenant la radiance atmosphérique dans la plage de travail du
     // nuage (réglées par capture). La couleur/teinte vient de l'atmosphère ; ces
@@ -197,8 +201,8 @@ struct CanvasView: View {
             }
         }
         // Recalcul des étoiles hors `body` : seulement au changement de lieu/heure
-        // (bucket ~60 s), pas à chaque frame de rotation/zoom.
-        .task(id: starKey) { recomputeStars() }
+        // (bucket ~60 s, élargi en défilement), pas à chaque frame de rotation/zoom.
+        .task(id: starKey) { await recomputeStars() }
         // Défilement automatique : avance/recule l'heure en continu (≈30 ips) au
         // rythme d'une heure par seconde réelle. `ContinuousClock` mesure le dt
         // réel (lissage indépendant de la cadence) ; relancé/arrêté au changement
@@ -232,13 +236,17 @@ struct CanvasView: View {
                 // Coordonnée appliquée tout de suite (astro/étoiles) ; le fuseau
                 // se corrige dès la résolution tzf (bref décalage du seul libellé
                 // d'heure, sans incidence sur le ciel).
-                Task { timeZoneOverride = await timeZoneService.timeZone(for: coordinate) }
+                Task {
+                    let zone = await timeZoneService.timeZone(for: coordinate)
+                    // Anti-course : n'appliquer que si le lieu n'a pas changé
+                    // depuis le lancement de cette résolution (complétions
+                    // possiblement dans le désordre).
+                    if coordinateOverride == coordinate { timeZoneOverride = zone }
+                }
             }
         }
-        .sheet(isPresented: $showEphemeris) {
-            EphemerisView(
-                ephemeris: astro.ephemeris(at: effectiveCoordinate, date: effectiveDate),
-                timeZone: effectiveTimeZone)
+        .sheet(item: $ephemerisPresentation) { presentation in
+            EphemerisView(ephemeris: presentation.ephemeris, timeZone: presentation.timeZone)
         }
         .fileExporter(
             isPresented: $showSaveExporter, document: saveDocument,
@@ -269,16 +277,32 @@ struct CanvasView: View {
         StarKey(
             latitude: effectiveCoordinate.latitude,
             longitude: effectiveCoordinate.longitude,
-            timeBucket: Int(effectiveDate.timeIntervalSince1970 / 60))
+            timeBucket: Int(effectiveDate.timeIntervalSince1970 / starBucketSeconds))
     }
 
-    /// Résout les directions monde des étoiles visibles pour l'instant courant.
-    private func recomputeStars() {
+    /// Largeur de la tranche de temps du recalcul des étoiles. À l'arrêt, 60 s
+    /// (rotation sidérale négligeable). En défilement, on l'élargit au prorata du
+    /// débit simulé pour plafonner le recalcul (~2 par seconde réelle) tout en
+    /// gardant des étoiles qui se déplacent dans le timelapse.
+    private var starBucketSeconds: Double {
+        guard autoPlay != .none else { return 60 }
+        let simSecondsPerRealSecond = Self.baseHoursPerSecond * Double(autoPlaySpeed) * 3600
+        return max(60, simSecondsPerRealSecond / 2)
+    }
+
+    /// Résout les directions monde des étoiles visibles pour l'instant courant. La
+    /// boucle sur les ~9000 étoiles (pure) tourne hors du main actor ; le résultat
+    /// est réassigné sur le main actor.
+    private func recomputeStars() async {
         let coordinate = effectiveCoordinate
+        let catalog = Self.starCatalog
         let sidereal = StarCatalog.localSiderealTime(
             date: effectiveDate, longitudeEast: coordinate.longitude)
-        starField = StarCatalog.visibleStars(
-            Self.starCatalog, latitude: coordinate.latitude, siderealTime: sidereal)
+        let latitude = coordinate.latitude
+        let stars = await Task.detached {
+            StarCatalog.visibleStars(catalog, latitude: latitude, siderealTime: sidereal)
+        }.value
+        starField = stars
         starRevision += 1
     }
 
@@ -338,7 +362,7 @@ struct CanvasView: View {
                         .transition(reveal)
                     actionBubble("arrow.uturn.forward", "action.redo", enabled: model.canRedo) { model.redo() }
                         .transition(reveal)
-                    actionBubble("trash", "action.clear", enabled: !model.strokes.isEmpty) { model.clear() }
+                    actionBubble("trash", "action.clear", enabled: model.hasStrokes) { model.clear() }
                         .transition(reveal)
                 }
                 moreBubble.transition(reveal)
@@ -539,28 +563,6 @@ struct CanvasView: View {
 
     // MARK: - Vues
 
-    #if DEBUG
-    /// Badge FPS de profilage (DEBUG) — collé à gauche, centré verticalement.
-    /// Alimenté par `DebugHUD.shared` (posé par le Renderer). Ne capture pas les
-    /// gestes.
-    private var debugFPSBadge: some View {
-        let hud = DebugHUD.shared
-        let ms = hud.fps > 0 ? 1000.0 / hud.fps : 0
-        return VStack(alignment: .leading, spacing: 2) {
-            Text("\(hud.fps, format: .number.precision(.fractionLength(0))) ips")
-                .font(.system(.title3, design: .monospaced).bold())
-            Text("\(ms, format: .number.precision(.fractionLength(1))) ms")
-                .font(.system(.caption, design: .monospaced))
-        }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
-        .padding(.leading, 6)
-        .allowsHitTesting(false)
-    }
-    #endif
-
     @ViewBuilder
     private func canvas(light: ResolvedLight) -> some View {
         let basis = cameraPose.basis
@@ -611,7 +613,7 @@ struct CanvasView: View {
                 onZoomEnded: { fovAnchor = nil })
         }
         #if DEBUG
-        .overlay(alignment: .leading) { debugFPSBadge }
+        .overlay(alignment: .leading) { DebugFPSBadge() }
         #endif
 
         if let aspect = context.displayAspect {
@@ -776,18 +778,26 @@ struct CanvasView: View {
         }
     }
 
-    private var timeLabel: String {
+    /// Formateur « HH:mm » 24 h réutilisé (le fuseau est réglé à chaque appel —
+    /// sûr car la vue est isolée au main actor). Éviter d'allouer un
+    /// `DateFormatter` à chaque `body` (jusqu'à ~30×/s en défilement).
+    private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = effectiveTimeZone
         formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
+
+    private var timeLabel: String {
+        let formatter = Self.timeFormatter
+        formatter.timeZone = effectiveTimeZone
         return formatter.string(from: effectiveDate)
     }
 
     /// Y a-t-il quelque chose à éditer (trait en cours ou historique) ? Conditionne
     /// l'apparition du sous-menu d'édition.
     private var hasEdits: Bool {
-        model.canUndo || model.canRedo || !model.strokes.isEmpty
+        model.canUndo || model.canRedo || model.hasStrokes
     }
 
     /// Bouton-bascule façon pinceau : révèle un panneau aligné à droite,
@@ -893,7 +903,11 @@ extension CanvasView {
                         activePanel = nil; center(on: light.moonPosition)
                     }
                     editButton("info.circle", "ephemeris.title", enabled: true) {
-                        activePanel = nil; showEphemeris = true
+                        activePanel = nil
+                        // Éphéméride figée à l'instant de l'ouverture (cf. `.sheet(item:)`).
+                        ephemerisPresentation = EphemerisPresentation(
+                            ephemeris: astro.ephemeris(at: effectiveCoordinate, date: effectiveDate),
+                            timeZone: effectiveTimeZone)
                     }
                 }
                 Divider()

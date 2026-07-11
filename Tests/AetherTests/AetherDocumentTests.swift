@@ -125,7 +125,7 @@ struct AetherDocumentTests {
 
         #expect(reopened.layers == savedLayers)
         // Tous les traits des calques rechargés reparaissent dans le modèle.
-        #expect(reopened.strokes == savedLayers.flatMap(\.strokes))
+        #expect(reopened.allStrokes == savedLayers.flatMap(\.strokes))
     }
 
     /// Un fichier d'un schéma antérieur (v1, cubes) est refusé proprement avec

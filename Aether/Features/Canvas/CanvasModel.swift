@@ -62,9 +62,9 @@ final class CanvasModel {
     var canUndo: Bool { !undoStack.isEmpty }
     var canRedo: Bool { !redoStack.isEmpty }
 
-    /// Tous les traits, aplatis (lecture seule) : pour l'état d'édition de l'UI
-    /// (y a-t-il à effacer ?).
-    var strokes: [BrushStroke] { layers.flatMap(\.strokes) }
+    /// Y a-t-il au moins un trait peint (tous calques confondus) ? Pour l'état
+    /// d'édition de l'UI (y a-t-il à effacer ?), sans allouer de tableau aplati.
+    var hasStrokes: Bool { layers.contains { !$0.strokes.isEmpty } }
 
     func beginStroke(at point: SIMD2<Float>, camera: StrokeCamera) {
         recordHistory()  // instantané d'avant-trait : l'annulation y revient
