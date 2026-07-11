@@ -647,11 +647,8 @@ struct CanvasView: View {
     /// Coordonnée effective compacte, ex. « 48.9°N, 2.4°E ».
     private var locationLabel: String {
         let coordinate = effectiveCoordinate
-        let lat = String(
-            format: "%.1f°%@", abs(coordinate.latitude), coordinate.latitude >= 0 ? "N" : "S")
-        let lon = String(
-            format: "%.1f°%@", abs(coordinate.longitude), coordinate.longitude >= 0 ? "E" : "W")
-        return "\(lat), \(lon)"
+        return CoordinateLabel.format(
+            latitude: coordinate.latitude, longitude: coordinate.longitude)
     }
 
     /// Liaison d'heure locale (heures décimales) : lit l'heure effective, écrit

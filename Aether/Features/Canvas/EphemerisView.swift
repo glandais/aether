@@ -104,7 +104,7 @@ struct EphemerisView: View {
     private var phaseIcon: String { ephemeris.moonPhase.symbolName }
 
     private var illumination: String {
-        "\(Int((ephemeris.moonIllumination * 100).rounded())) %"
+        ephemeris.moonIllumination.formatted(.percent.precision(.fractionLength(0)))
     }
 }
 

@@ -144,6 +144,78 @@
         }
       }
     },
+    "compass.east" : {
+      "comment" : "Abréviation cardinale dans une coordonnée (ex. « 48.9°N »).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "E"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "E"
+          }
+        }
+      }
+    },
+    "compass.north" : {
+      "comment" : "Abréviation cardinale dans une coordonnée (ex. « 48.9°N »).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "N"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "N"
+          }
+        }
+      }
+    },
+    "compass.south" : {
+      "comment" : "Abréviation cardinale dans une coordonnée (ex. « 48.9°N »).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "S"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "S"
+          }
+        }
+      }
+    },
+    "compass.west" : {
+      "comment" : "Abréviation cardinale dans une coordonnée (ex. « 48.9°N »).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "W"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O"
+          }
+        }
+      }
+    },
     "ephemeris.alwaysDown" : {
       "comment" : "Éphéméride : astre sous l'horizon tout le jour (nuit polaire).",
       "extractionState" : "manual",
