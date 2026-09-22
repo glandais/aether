@@ -51,23 +51,29 @@ vérité). `Aether.xcodeproj` est **git-ignoré** et régénéré via
 
 ### Build & vérification
 
-Simulateur de référence : **iPhone 17 Pro** ; `DerivedData` dans `build/dd`.
+Simulateur : **celui déjà démarré**, ciblé par son UDID — jamais par nom ni
+`booted` (cf. instructions globales : un seul simulateur à la fois). Sur la
+machine de dev : **iPhone 17 Pro Max**, iOS 26.5
+(`05EC0174-83A8-4D6D-B334-BB93E84C8D46`). `DerivedData` dans `build/dd`.
+`scripts/verify.sh` applique la même règle (surcharge : `AETHER_DESTINATION`).
 
 ```sh
+# 0. UDID du simulateur démarré
+SIM="$(xcrun simctl list devices booted | grep -oE '[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}' | head -1)"
+
 # 1. (Re)générer le projet après tout ajout/déplacement de fichier
 xcodegen generate
 
 # 2. Compiler
 xcodebuild build -project Aether.xcodeproj -scheme Aether \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath build/dd
+  -destination "platform=iOS Simulator,id=$SIM" -derivedDataPath build/dd
 
 # 3. Tests (métier : astro, météo, éclairage…)
 xcodebuild test -project Aether.xcodeproj -scheme Aether \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath build/dd
+  -destination "platform=iOS Simulator,id=$SIM" -derivedDataPath build/dd
 
 # 4. Vérification visuelle : installer, lancer, capturer
 APP="build/dd/Build/Products/Debug-iphonesimulator/Aether.app"
-SIM="iPhone 17 Pro"
 xcrun simctl install "$SIM" "$APP"
 xcrun simctl launch "$SIM" io.github.glandais.aether
 xcrun simctl io "$SIM" screenshot build/shot.png
