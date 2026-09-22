@@ -8,9 +8,16 @@
 > `Rendering/MetalView.swift`) plus `CanvasModel`, Renderer entry points, and
 > the services they touch.
 >
-> **Statut :** tous les findings (P1–P6, C1–C3, S1–S3) sont corrigés le
-> 2026-07-11 — voir les commits `perf:`/`refactor:`/`fix:` correspondants sur
-> `develop`. Le tableau ci-dessous est conservé comme trace de l'audit.
+> **Statut :** une première passe (2026-07-11, commits `394f04b`, `879a6e7`,
+> `174083f`, `a550622`) traitait tous les findings (P1–P6, C1–C3, S1–S3). Une
+> re-vérification du 2026-09-22 a montré que **P1, S2 et S3** n'étaient que
+> partiellement corrigés, et que **P5, C1, C2 et C3** gardaient des points
+> mineurs. Tous sont complétés par les correctifs du 2026-09-22 — voir les
+> commits correspondants sur `develop`. Build, SwiftLint `--strict`, Periphery,
+> `xcodebuild analyze` (0 avertissement) et tests (67, 0 échec) sont verts ;
+> quelques points mineurs non bloquants restent ouverts, listés dans
+> « Re-verification (2026-09-22) ». Les findings ci-dessous sont conservés tels
+> quels comme trace de l'audit.
 
 ## Summary
 
@@ -231,3 +238,44 @@ Same for the throwaway `CanvasModel()` built on every init before
 **P2** (trivial, unblocks honest profiling) → **P1** (the structural win) →
 **P3/P4** (small, ride along with P1's refactor) → **C1/C2** → the rest as
 opportunity allows.
+
+---
+
+## Re-verification (2026-09-22)
+
+A second look at the first-pass fixes found gaps. The findings above are left
+unchanged; this table records what the first pass left and what was completed.
+P2, P3, P4, P6 and S1 were confirmed fixed by the first pass (S1's remaining
+closure bindings were removed as part of P1).
+
+| ID | After the first pass | Completed on 2026-09-22 |
+|----|----------------------|-------------------------|
+| P1 | Light cached by date/place, but chrome still built from computed properties inside `CanvasView` (904 lines); `PaintPanel` read `model.layers`, so every stroke point re-ran it | Chrome split into `ToolPalette`, `MorePanel`, `PositionPanel` (new files); `PaintPanel` takes an `Equatable` `LayerSummary` per genus and is skipped on stroke points; `body` resolves default hour/day and instant once; `TimeBar`/`PositionPanel` use an `Optional[orDefault:]` subscript instead of closure bindings. `CanvasView` is now ~640 lines |
+| S2 | `CanvasView.init` still built a `CLLocationManager` (via the location service) and a throwaway `CanvasModel()` | `CLLocationManager` is a `lazy var` in `CoreLocationService`; `CanvasModel(context:restored:)` is built once per scene in `RootView.open(_:restored:)` (gallery, `.aether` reopen and `ScreenshotHarness`) and passed in |
+| S3 | Compass points and `%` localized, but the clock still used an `en_US_POSIX` `DateFormatter` and coordinates used `String(format: "%.1f")` | Shared `ClockTime.format(_:timeZone:)` (24 h `Date.VerbatimFormatStyle`, explicit time zone) used by `CanvasView` and `EphemerisView`, covered by `ClockTimeTests`; `CoordinateLabel` formats degrees with the locale's decimal separator and picks the pair separator from it (" ; " when the decimal is a comma, e.g. "48,9°N ; 2,4°E", otherwise ", ") |
+| P5 | Star recompute moved off the main actor, but a late result for an old key could overwrite a newer one | `guard !Task.isCancelled` before assigning `starField` / bumping `starRevision` |
+| C1 | Modern `.alert`, but the title was derived from an optional cleared on dismiss (empty-title flash) | `openError` keeps the last error; a separate `showOpenError` Bool drives the alert |
+| C2 | Read moved into a `Task`, but `load(_:)` could still run on the main actor | `load(_:)` marked `@concurrent` |
+| C3 | Stale comment; pick applied the coordinate before the zone; concurrent lookups could overwrite each other | Coordinate and zone written together after the tzf lookup; a single `locationTask` (`replaceLocationTask`) cancels the previous lookup; both paths check `Task.isCancelled` before writing |
+
+**Verification:** build OK; SwiftLint `--strict` and Periphery clean;
+`xcodebuild analyze` succeeded with 0 warnings; 67 Swift Testing tests in 15
+suites passed; simulator screenshots (en and fr, `noon:13:shown:cumulus`,
+`dusk:18.5:shown:perf`, "More" and position panels) render correctly at 60 fps.
+
+**Still open (minor, not blocking):**
+
+- "Here & now": `isResolvingHereNow = true` is now set inside the task, so for
+  one frame after the tap the button is not disabled and no spinner shows. A
+  second tap restarts the lookup, so the result is still correct. Fix: set it
+  right after `replaceLocationTask` returns.
+- `CoreLocationService`: a late `didUpdateLocations` from a cancelled request
+  can resume the next request's continuation. It returns a real, recent
+  location, so there is no functional impact.
+- `LocationPickerView` shares the location service: starting a GPS lookup there
+  silently cancels a pending "here & now" (its spinner turns off correctly).
+- `ToolPalette.body` (and `MorePanel` when open) still re-run on every stroke
+  point because they take closures; accepted, as the costly `PaintPanel` is
+  skipped.
+- One local `Binding(get:set:)` remains for the opacity slider in `PaintPanel`.
+- A running place lookup is not cancelled when the canvas disappears.
