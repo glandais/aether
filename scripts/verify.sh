@@ -26,7 +26,18 @@ ROOT="$(pwd)"
 
 SCHEME="Aether"
 PROJECT="Aether.xcodeproj"
-DESTINATION="platform=iOS Simulator,name=iPhone 17 Pro"
+# Destination de l'analyse : `AETHER_DESTINATION` si fourni, sinon le
+# simulateur déjà démarré (par UDID, pour ne jamais en démarrer un second),
+# sinon le simulateur de référence par son nom.
+booted_udid="$(xcrun simctl list devices booted 2>/dev/null \
+  | grep -oE '[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}' | head -1)"
+if [ -n "${AETHER_DESTINATION:-}" ]; then
+  DESTINATION="$AETHER_DESTINATION"
+elif [ -n "$booted_udid" ]; then
+  DESTINATION="platform=iOS Simulator,id=$booted_udid"
+else
+  DESTINATION="platform=iOS Simulator,name=iPhone 17 Pro"
+fi
 DERIVED_DATA="build/dd"
 
 # --- Vérifier la présence des outils ------------------------------------------
