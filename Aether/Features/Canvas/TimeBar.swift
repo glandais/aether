@@ -8,7 +8,11 @@ import SwiftUI
 /// d'invalidation : elle ne lit que l'heure, le sens/vitesse de défilement et le
 /// libellé — pas l'éclairage résolu ni les calques.
 struct TimeBar: View {
-    @Binding var hour: Double
+    /// Heure locale choisie (heures décimales). `nil` = heure d'origine de la
+    /// scène (`defaultHour`) ; déplacer le curseur pose la surcharge.
+    @Binding var hourOverride: Double?
+    /// Heure d'origine de la scène, montrée tant qu'aucune heure n'est choisie.
+    let defaultHour: Double
     let isDaytime: Bool
     let timeLabel: String
     @Binding var autoPlay: AutoPlay
@@ -23,7 +27,7 @@ struct TimeBar: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             autoPlayButton(.backward, icon: "backward.fill", label: "time.rewind")
-            Slider(value: $hour, in: 0...24)
+            Slider(value: $hourOverride[orDefault: defaultHour], in: 0...24)
                 .tint(.white.opacity(0.55))
             autoPlayButton(.forward, icon: "forward.fill", label: "time.advance")
             speedButton

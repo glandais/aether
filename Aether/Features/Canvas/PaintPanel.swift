@@ -6,11 +6,36 @@ import SwiftUI
 /// sont listés du plus haut (cirrus) au plus bas (cumulus), comme on les lit dans
 /// le ciel ; les réglages de pinceau, globaux, suivent sous un filet.
 ///
-/// Vue à part liée au `CanvasModel` (`@Bindable`) : glisser un curseur de pinceau
-/// ou d'opacité ne réinvalide que ce panneau, pas `CanvasView.body` (donc ni
-/// l'éclairage résolu ni le diff `MetalView`).
+/// Frontière d'invalidation : le panneau ne lit **pas** `model.layers`. L'état des
+/// étages lui arrive en résumé `Equatable` (`layers`, calculé par `CanvasView`) :
+/// un point de trait (`extendStroke`) change les calques mais pas ce résumé, donc
+/// ne réévalue pas ce panneau. Le modèle (`@Bindable`, comparé par identité) ne
+/// sert qu'aux écritures et aux réglages que `CanvasView` ne lit pas : étage
+/// actif, rayon et douceur du pinceau — glisser ces curseurs ne réinvalide que ce
+/// panneau. En revanche l'opacité et la visibilité modifient `layers`, lus par le
+/// rendu : les régler réévalue `CanvasView.body` (inhérent au rendu).
 struct PaintPanel: View {
+    /// Résumé d'un étage déjà peint (sa présence dans `layers` = l'étage existe).
+    struct LayerSummary: Equatable {
+        var isVisible: Bool
+        var opacity: Float
+    }
+
     @Bindable var model: CanvasModel
+    /// État des étages peints, par genre (absent = étage vierge).
+    let layers: [CloudGenus: LayerSummary]
+
+    /// Résume les calques du modèle pour le panneau (visibilité, opacité par
+    /// genre). Appelé par le parent, qui lit déjà `layers` pour le rendu.
+    static func summaries(of model: CanvasModel) -> [CloudGenus: LayerSummary] {
+        var result: [CloudGenus: LayerSummary] = [:]
+        for genus in genusOrder {
+            if let layer = model.layer(for: genus) {
+                result[genus] = LayerSummary(isVisible: layer.isVisible, opacity: layer.opacity)
+            }
+        }
+        return result
+    }
 
     /// Étages affichés, du plus haut au plus bas.
     private static let genusOrder: [CloudGenus] = [.cirrus, .altocumulus, .cumulus]
@@ -38,7 +63,7 @@ struct PaintPanel: View {
     /// œil de visibilité. Le nom sélectionne le calque actif (la peinture y va).
     @ViewBuilder
     private func genusRow(_ genus: CloudGenus, active: Bool) -> some View {
-        let layer = model.layer(for: genus)
+        let layer = layers[genus]
         HStack(spacing: 10) {
             Button {
                 withAnimation(.easeInOut(duration: 0.15)) { model.selectGenus(genus) }
@@ -79,14 +104,20 @@ struct PaintPanel: View {
     /// est vierge — rien à doser sans matière peinte.
     @ViewBuilder
     private func opacityControl(for genus: CloudGenus) -> some View {
-        let layer = model.layer(for: genus)
+        let layer = layers[genus]
+        // Lecture depuis le résumé (valeur), écriture vers le modèle : pas de
+        // lecture de `model.layers` dans ce panneau. Étage vierge → 1 (curseur
+        // de toute façon inactif).
+        let opacity = Binding(
+            get: { layer?.opacity ?? 1 },
+            set: { model.setOpacity($0, for: genus) })
         HStack(spacing: 10) {
             Image(systemName: "circle.lefthalf.filled")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .frame(width: 18)
             Slider(
-                value: $model[opacityFor: genus],
+                value: opacity,
                 in: 0...1,
                 onEditingChanged: { editing in
                     // Au début du geste seulement : un instantané d'historique,
