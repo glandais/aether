@@ -79,5 +79,8 @@ d'avancement : [`CLAUDE.md`](./CLAUDE.md). Pipeline de rendu détaillé :
 [`docs/PIPELINE.md`](./docs/PIPELINE.md). Persistance d'un ciel (`.aether`) :
 [`docs/PERSISTENCE.md`](./docs/PERSISTENCE.md). Références algorithmiques (papers
 + code) : [`BIBLIO.md`](./BIBLIO.md).
-</content>
-</invoke>
+
+## Soutenir
+
+Si Aether vous plaît, vous pouvez laisser un pourboire sur Ko-fi :
+[ko-fi.com/gabylandais](https://ko-fi.com/gabylandais).
