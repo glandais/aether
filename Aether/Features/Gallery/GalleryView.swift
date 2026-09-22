@@ -11,9 +11,12 @@ struct GalleryView: View {
     @State private var showImporter = false
     /// Feuille « À propos » (liens site, support, App Store…).
     @State private var showAbout = false
-    /// Échec d'ouverture présenté à l'utilisateur (`nil` = pas d'alerte). Distingue
-    /// le fichier illisible du fichier d'une version antérieure d'Aether.
-    @State private var openError: OpenError?
+    /// Dernier échec d'ouverture, distinguant le fichier illisible du fichier
+    /// d'une version antérieure d'Aether. Volontairement **conservé** après la
+    /// fermeture de l'alerte (présentation pilotée par `showOpenError`) : le
+    /// titre reste figé pendant l'animation de disparition, sans flash vide.
+    @State private var openError: OpenError = .unreadable
+    @State private var showOpenError = false
 
     /// Cas d'échec d'ouverture, chacun avec son message localisé sobre.
     private enum OpenError: Error {
@@ -77,12 +80,12 @@ struct GalleryView: View {
                 if case .success(let url) = result {
                     open(url)
                 } else {
-                    openError = .unreadable
+                    presentOpenError(.unreadable)
                 }
             }
             .alert(
-                openErrorMessage,
-                isPresented: isShowingOpenError
+                String(localized: openError.messageKey, table: "Aether"),
+                isPresented: $showOpenError
             ) {
                 // Aucune action explicite : le système ajoute un bouton de
                 // fermeture par défaut, comme l'ancien `Alert(title:)`.
@@ -90,21 +93,10 @@ struct GalleryView: View {
         }
     }
 
-    /// Titre de l'alerte : message localisé de l'échec courant (chaîne vide quand
-    /// aucune alerte n'est présentée — le titre n'est alors pas affiché).
-    private var openErrorMessage: String {
-        openError.map { String(localized: $0.messageKey, table: "Aether") } ?? ""
-    }
-
-    /// Passerelle `Bool` pilotant la présentation de l'alerte depuis `openError` :
-    /// la fermeture (système) remet l'échec à `nil`.
-    private var isShowingOpenError: Binding<Bool> {
-        Binding(
-            get: { openError != nil },
-            set: { presented in
-                if !presented { openError = nil }
-            }
-        )
+    /// Présente l'alerte d'échec d'ouverture pour `error`.
+    private func presentOpenError(_ error: OpenError) {
+        openError = error
+        showOpenError = true
     }
 
     /// Décode un fichier `.aether` et reconstruit la scène + l'état du canvas. La
@@ -116,16 +108,19 @@ struct GalleryView: View {
             case .success(let loaded):
                 onSelect(loaded.context, loaded.restored)
             case .failure(let error):
-                openError = error
+                presentOpenError(error)
             }
         }
     }
 
-    /// Lit et décode le fichier `.aether` **hors de l'acteur principal** : un
+    /// Lit et décode le fichier `.aether` **hors de l'acteur principal**
+    /// (`@concurrent` : exécution explicite sur l'exécuteur concurrent global,
+    /// indépendamment du réglage `nonisolated(nonsending)` par défaut) : un
     /// fichier iCloud Drive non téléchargé peut bloquer longtemps, ce qui figerait
     /// l'UI si la lecture se faisait sur le fil principal. L'accès sandbox encadre
     /// la lecture dans ce même contexte d'exécution. Renvoie l'échec typé le cas
     /// échéant (illisible vs version incompatible), identique à l'ancien code.
+    @concurrent
     private nonisolated static func load(_ url: URL) async -> sending Result<LoadedScene, OpenError> {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }

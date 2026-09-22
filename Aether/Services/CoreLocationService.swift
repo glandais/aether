@@ -23,28 +23,57 @@ final class CoreLocationService: NSObject, LocationService {
         manager.desiredAccuracy = kCLLocationAccuracyKilometer
         return manager
     }()
-    private var authContinuation: CheckedContinuation<CLAuthorizationStatus, Never>?
+    private var authContinuation: CheckedContinuation<CLAuthorizationStatus, Error>?
     private var locationContinuation: CheckedContinuation<GeoCoordinate, Error>?
+    /// Numéro de la demande propriétaire des continuations en attente : une
+    /// annulation qui arrive en retard (saut asynchrone vers le main actor) ne
+    /// doit pas rejeter la demande suivante.
+    private var currentRequest = 0
 
     func currentCoordinate() async throws -> GeoCoordinate {
-        let status = await authorize()
-        guard status == .authorizedWhenInUse || status == .authorizedAlways else {
-            throw LocationError.denied
-        }
-        return try await withCheckedThrowingContinuation { continuation in
-            locationContinuation = continuation
-            manager.requestLocation()
+        // Une nouvelle demande remplace l'ancienne : ses continuations sont
+        // reprises (annulées) avant d'être écrasées, jamais abandonnées.
+        cancelPending()
+        currentRequest += 1
+        let request = currentRequest
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            let status = try await authorize()
+            guard status == .authorizedWhenInUse || status == .authorizedAlways else {
+                throw LocationError.denied
+            }
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { continuation in
+                locationContinuation = continuation
+                manager.requestLocation()
+            }
+        } onCancel: {
+            // La tâche appelante est annulée : CoreLocation n'en sait rien, on
+            // reprend nous-mêmes la continuation pendante de *cette* demande.
+            Task { @MainActor [weak self] in
+                guard let self, self.currentRequest == request else { return }
+                self.cancelPending()
+            }
         }
     }
 
     /// Statut courant, en demandant l'autorisation si elle n'est pas déterminée.
-    private func authorize() async -> CLAuthorizationStatus {
+    private func authorize() async throws -> CLAuthorizationStatus {
         let current = manager.authorizationStatus
         guard current == .notDetermined else { return current }
-        return await withCheckedContinuation { continuation in
+        return try await withCheckedThrowingContinuation { continuation in
             authContinuation = continuation
             manager.requestWhenInUseAuthorization()
         }
+    }
+
+    /// Reprend en `CancellationError` les continuations en attente (chacune
+    /// doit être reprise exactement une fois).
+    private func cancelPending() {
+        authContinuation?.resume(throwing: CancellationError())
+        authContinuation = nil
+        locationContinuation?.resume(throwing: CancellationError())
+        locationContinuation = nil
     }
 }
 

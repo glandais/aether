@@ -47,6 +47,10 @@ struct CanvasView: View {
     @State private var ephemerisPresentation: EphemerisPresentation?
     /// Résolution « ici & maintenant » en cours (position GPS + fuseau).
     @State private var isResolvingHereNow = false
+    /// Unique résolution de lieu en cours (choix manuel ou « ici & maintenant »).
+    /// Toute nouvelle demande annule la précédente : un résultat en retard
+    /// n'écrase jamais un choix plus récent.
+    @State private var locationTask: Task<Void, Never>?
     /// Défilement automatique du temps (aucun / avance / recul). Exclusif.
     @State private var autoPlay: AutoPlay = .none
     /// Multiplicateur de vitesse du défilement (1, 2, 4, 8, 16). 1× = 0,25 h/s.
@@ -216,16 +220,14 @@ struct CanvasView: View {
             LocationPickerView(
                 initial: effectiveCoordinate, locationService: locationService
             ) { coordinate in
-                coordinateOverride = coordinate
-                // Coordonnée appliquée tout de suite (astro/étoiles) ; le fuseau
-                // se corrige dès la résolution tzf (bref décalage du seul libellé
-                // d'heure, sans incidence sur le ciel).
-                Task {
+                // Coordonnée et fuseau écrits **ensemble** après la résolution tzf
+                // (l'instant effectif dépend du fuseau : les écrire séparément
+                // ferait sauter le ciel d'un décalage horaire).
+                replaceLocationTask { @MainActor in
                     let zone = await timeZoneService.timeZone(for: coordinate)
-                    // Anti-course : n'appliquer que si le lieu n'a pas changé
-                    // depuis le lancement de cette résolution (complétions
-                    // possiblement dans le désordre).
-                    if coordinateOverride == coordinate { timeZoneOverride = zone }
+                    guard !Task.isCancelled else { return }
+                    coordinateOverride = coordinate
+                    timeZoneOverride = zone
                 }
             }
         }
@@ -286,6 +288,9 @@ struct CanvasView: View {
         let stars = await Task.detached {
             StarCatalog.visibleStars(catalog, latitude: latitude, siderealTime: sidereal)
         }.value
+        // Clé changée entre-temps (tâche annulée) : un calcul en retard ne doit
+        // pas écraser celui, plus récent, de la nouvelle clé.
+        guard !Task.isCancelled else { return }
         starField = stars
         starRevision += 1
     }
@@ -477,11 +482,15 @@ struct CanvasView: View {
     /// Recale lieu (position GPS), jour et heure sur l'instant courant. Échec
     /// silencieux si la position est indisponible (refus, pas de fix).
     private func resetToHereAndNow() {
-        isResolvingHereNow = true
-        Task {
-            defer { isResolvingHereNow = false }
-            guard let coordinate = try? await locationService.currentCoordinate() else { return }
+        replaceLocationTask { @MainActor in
+            isResolvingHereNow = true
+            // Annulée (choix manuel entre-temps) : c'est la nouvelle tâche qui
+            // pilote désormais l'indicateur, on n'y touche plus.
+            defer { if !Task.isCancelled { isResolvingHereNow = false } }
+            guard let coordinate = try? await locationService.currentCoordinate(),
+                  !Task.isCancelled else { return }
             let zone = await timeZoneService.timeZone(for: coordinate)
+            guard !Task.isCancelled else { return }
             coordinateOverride = coordinate
             timeZoneOverride = zone
             // Instant courant dans le fuseau résolu, exprimé comme les sélecteurs :
@@ -493,6 +502,14 @@ struct CanvasView: View {
             dateOverride = Self.noonUTC(components)
             hourOverride = Double(components.hour ?? 12) + Double(components.minute ?? 0) / 60
         }
+    }
+
+    /// Remplace la résolution de lieu en cours par `operation` : l'ancienne est
+    /// annulée (et son indicateur « ici & maintenant » éteint).
+    private func replaceLocationTask(_ operation: @escaping @MainActor () async -> Void) {
+        locationTask?.cancel()
+        isResolvingHereNow = false
+        locationTask = Task { await operation() }
     }
 
     /// Coordonnée effective compacte, ex. « 48.9°N, 2.4°E ».
