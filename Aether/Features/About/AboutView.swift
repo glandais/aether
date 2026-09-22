@@ -13,15 +13,25 @@ enum AppLinks {
     static let developerApps = URL(string: "https://apps.apple.com/developer/id1891310404")!
 }
 
-/// Feuille « À propos » discrète, ouverte depuis la galerie : version de l'app
-/// et liens vers le site, le support, la confidentialité, le code source et
-/// l'App Store.
+/// Feuille « À propos » discrète, ouverte depuis la galerie : les pourboires,
+/// la version de l'app et les liens vers le site, le support, la
+/// confidentialité, le code source et l'App Store.
 struct AboutView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(TipJar.self) private var tipJar
 
     var body: some View {
         NavigationStack {
             List {
+                // Le pourboire passe par l'achat intégré et reste dans l'app
+                // (directive 3.1.1) : un écran poussé, pas un lien sortant.
+                Section {
+                    NavigationLink {
+                        TipJarView(tipJar: tipJar)
+                    } label: {
+                        Label(String(localized: "about.tip", table: "Aether"), systemImage: "cup.and.saucer")
+                    }
+                }
                 Section {
                     row("about.website", systemImage: "globe", url: AppLinks.website)
                     row("about.support", systemImage: "questionmark.circle", url: AppLinks.support)

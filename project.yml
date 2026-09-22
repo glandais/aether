@@ -82,6 +82,8 @@ schemes:
         Aether: all
     run:
       config: Debug
+      # Pourboires : achats en local depuis Xcode, sans compte sandbox.
+      storeKitConfiguration: Tips.storekit
     test:
       config: Debug
       targets:

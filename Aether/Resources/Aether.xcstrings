@@ -91,6 +91,24 @@
         }
       }
     },
+    "about.tip" : {
+      "comment" : "Ligne de la feuille « À propos » qui ouvre l'écran des pourboires (achat intégré).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Support Aether"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Soutenir Aether"
+          }
+        }
+      }
+    },
     "about.title" : {
       "comment" : "Titre de la feuille « À propos » et libellé du bouton qui l'ouvre (galerie).",
       "extractionState" : "manual",
@@ -1153,6 +1171,132 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Vitesse de défilement"
+          }
+        }
+      }
+    },
+    "tip.failed" : {
+      "comment" : "Échec d'un pourboire.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The purchase didn't go through."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L'achat n'a pas abouti."
+          }
+        }
+      }
+    },
+    "tip.header" : {
+      "comment" : "En-tête de la liste des pourboires.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aether is free and open source. A tip unlocks nothing: it just says thank you."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aether est gratuit et open source. Un pourboire ne débloque rien : il dit simplement merci."
+          }
+        }
+      }
+    },
+    "tip.pending" : {
+      "comment" : "Achat soumis à l'autorisation parentale (Demander l'autorisation d'acheter).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for approval. The tip will go through once it is approved."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En attente d'approbation. Le pourboire passera une fois approuvé."
+          }
+        }
+      }
+    },
+    "tip.retry" : {
+      "comment" : "Bouton pour recharger les pourboires.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Try Again"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Réessayer"
+          }
+        }
+      }
+    },
+    "tip.thanks" : {
+      "comment" : "Affiché après un pourboire réussi.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thank you!"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Merci !"
+          }
+        }
+      }
+    },
+    "tip.title" : {
+      "comment" : "Titre de l'écran des pourboires.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leave a Tip"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laisser un pourboire"
+          }
+        }
+      }
+    },
+    "tip.unavailable" : {
+      "comment" : "Le store n'a renvoyé aucun pourboire (hors ligne, produits non validés).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tips are unavailable right now."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les pourboires sont indisponibles pour le moment."
           }
         }
       }

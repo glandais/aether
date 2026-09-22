@@ -196,7 +196,29 @@ simulateur** (cf. « Build & vérification »).
 Import de photo personnelle (profondeur CoreML/LiDAR, EXIF, caméra calée sur la
 photo) · partage social / comptes / backend · export vidéo ou animation ·
 spécifique iPad au-delà de l'universal de base · localisation au-delà de fr/en ·
-IAP, analytics, crash reporting.
+analytics, crash reporting. Seul achat intégré : les pourboires (ci-dessous).
+
+## Pourboires
+
+Trois achats **consommables** qui ne débloquent rien, depuis la feuille « À
+propos » → « Soutenir Aether » (`Features/Tips/`). Un pourboire au développeur,
+dans l'app, passe par l'achat intégré (directive 3.1.1) : **aucun lien de don
+externe dans l'app**, Ko-fi reste sur le site et le README.
+
+- Produits ASC : `io.github.glandais.aether.tip.small` (0,99 €, `6814744465`),
+  `.medium` (2,99 €, `6814744411`), `.large` (4,99 €, `6814744528`). Pays de base
+  France, 175 territoires, noms fr/en. Le premier achat intégré part **avec une
+  version de l'app** : les joindre à la soumission de la 1.0.
+- `TipJar.swift` est copié du fichier de référence commun aux apps du
+  développeur (dépôt `donations`, hors de ce dépôt) ; `TipJarView` en est
+  l'adaptation à la table `Aether`. Noms et prix viennent du store
+  (`displayName`, `displayPrice`) : le catalogue n'en porte aucun.
+- `Tips.storekit` (racine) est branché sur le schéma par `storeKitConfiguration`.
+  Il ne vaut **que pour un lancement depuis Xcode** : installée par `simctl`,
+  l'app interroge le vrai store et l'écran dit « indisponible » tant que les
+  produits ne sont pas validés.
+- Sur simulateur, `axe tap` ne déclenche pas les `NavigationLink` ni le bouton
+  « Acheter » de la feuille de test : passer `--tap-style physical`.
 
 ## État d'avancement
 
