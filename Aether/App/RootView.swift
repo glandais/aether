@@ -7,13 +7,19 @@ struct RootView: View {
     /// État de canvas à réappliquer quand la scène vient d'un fichier `.aether`
     /// rechargé ; `nil` pour un paysage curé neuf.
     @State private var restored: RestoredCanvasState?
+    /// Modèle de peinture de la scène ouverte, construit **une seule fois** à
+    /// l'ouverture (cf. `open`) et conservé ici : les ré-inits de `CanvasView`
+    /// ne le reconstruisent pas.
+    @State private var canvasModel: CanvasModel?
     /// Interface masquée (harnais de capture) : canvas plein écran sans chrome.
     @State private var chromeHidden = false
 
     var body: some View {
         ZStack {
-            if let context {
-                CanvasView(context: context, restored: restored, chromeHidden: chromeHidden)
+            if let context, let canvasModel {
+                CanvasView(
+                    context: context, model: canvasModel,
+                    restored: restored, chromeHidden: chromeHidden)
                     // Nouvelle scène (curée ou rechargée) = nouvelle identité :
                     // `@State` réamorcé proprement, sans fuite de l'état précédent.
                     .id(context.id)
@@ -21,8 +27,7 @@ struct RootView: View {
                     .transition(.opacity)
             } else {
                 GalleryView { selected, restoredState in
-                    restored = restoredState
-                    context = selected
+                    open(selected, restored: restoredState)
                 }
                 .transition(.opacity)
             }
@@ -34,17 +39,25 @@ struct RootView: View {
         #if DEBUG
         .onAppear {
             if context == nil, let setup = ScreenshotHarness.setupFromEnvironment() {
-                restored = setup.restored
                 chromeHidden = setup.chromeHidden
-                context = setup.context
+                open(setup.context, restored: setup.restored)
             }
         }
         #endif
     }
 
+    /// Ouvre une scène (curée ou rechargée) : son modèle est construit ici, une
+    /// fois, avant de basculer sur le canvas.
+    private func open(_ selected: SceneContext, restored restoredState: RestoredCanvasState?) {
+        restored = restoredState
+        canvasModel = CanvasModel(context: selected, restored: restoredState)
+        context = selected
+    }
+
     private var backButton: some View {
         Button {
             context = nil
+            canvasModel = nil
         } label: {
             Image(systemName: "chevron.left")
                 .font(.headline)

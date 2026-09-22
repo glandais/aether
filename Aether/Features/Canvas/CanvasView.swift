@@ -27,7 +27,10 @@ struct CanvasView: View {
     /// « Options ») pour un ciel plein cadre.
     private let chromeHidden: Bool
 
-    @State private var model = CanvasModel()
+    /// Modèle de peinture, construit **une fois par scène** par `RootView`
+    /// (cf. `CanvasModel.init(context:restored:)`) et conservé là-haut en `@State` :
+    /// une ré-init de cette vue ne reconstruit rien, elle ne fait que le référencer.
+    @Bindable private var model: CanvasModel
     /// Heure locale choisie (heures, 0…24). `nil` = heure d'origine de la scène.
     @State private var hourOverride: Double?
     /// Jour choisi. `nil` = date d'origine de la scène. Déplace soleil, lune et
@@ -77,23 +80,17 @@ struct CanvasView: View {
     /// dépendance d'invalidation.
     @State private var lightCache = AstroLightCache()
 
-    /// Construit la vue, éventuellement réamorcée depuis un fichier `.aether`
-    /// rechargé : les traits, le regard, le pinceau et les surcharges
-    /// (heure/jour/lieu/fuseau/FOV) sont appliqués d'emblée, sans frame transitoire.
-    init(context: SceneContext, restored: RestoredCanvasState? = nil, chromeHidden: Bool = false) {
+    /// Construit la vue sur le modèle de la scène (déjà réamorcé depuis un
+    /// fichier `.aether` rechargé le cas échéant) : les surcharges
+    /// (heure/jour/lieu/fuseau/FOV) de `restored` sont appliquées d'emblée, sans
+    /// frame transitoire.
+    init(
+        context: SceneContext, model: CanvasModel,
+        restored: RestoredCanvasState? = nil, chromeHidden: Bool = false
+    ) {
         self.context = context
         self.chromeHidden = chromeHidden
-        let model = CanvasModel()
-        // Défauts par calque issus de la météo statique du paysage (étape 6) :
-        // posés avant tout trait neuf. Les calques rechargés (`load`) portent leurs
-        // propres surcharges sauvegardées et n'en héritent pas.
-        model.applySceneDefaults(context.cloudParameters)
-        if let restored {
-            model.load(
-                layers: restored.layers, viewYaw: restored.viewYaw, viewPitch: restored.viewPitch,
-                brushRadius: restored.brushRadius, brushSoftness: restored.brushSoftness)
-        }
-        _model = State(initialValue: model)
+        _model = Bindable(model)
         _hourOverride = State(initialValue: restored?.hourOverride)
         _dateOverride = State(initialValue: restored?.dateOverride)
         _coordinateOverride = State(initialValue: restored?.coordinateOverride)
@@ -116,9 +113,11 @@ struct CanvasView: View {
 
     // Dépendances exposées via leur protocole (cf. CLAUDE.md : SwiftAA / tzf
     // cachés derrière une abstraction pour la testabilité). `SwiftAAAstroService`
-    // est une struct sans état ; les services **avec** état (fuseau tzf à cache
-    // paresseux, `CLLocationManager`) vivent en `@State` pour persister à travers
-    // les ré-inits de la vue au lieu d'être réalloués à chaque fois.
+    // est une struct sans état ; les services **avec** état (cache tzf, point GPS
+    // en attente) vivent en `@State` pour persister d'une ré-init à l'autre. La
+    // valeur par défaut d'un `@State` est tout de même réévaluée à chaque init
+    // (puis jetée) : ces deux services sont donc bon marché à construire — le
+    // `DefaultFinder` tzf et le `CLLocationManager` ne sont créés qu'au premier usage.
     private let astro: AstroService = SwiftAAAstroService()
     private let atmosphere = Atmosphere.earth
     @State private var timeZoneService: TimeZoneService = TzfTimeZoneService()
@@ -644,5 +643,21 @@ private extension SIMD2<Float> {
     /// Confine le point au canvas [0,1]² (un drag peut sortir des bords).
     func clamped() -> SIMD2<Float> {
         simd_clamp(self, .zero, .one)
+    }
+}
+
+extension CanvasModel {
+    /// Modèle d'une scène : défauts par calque issus de la météo statique du
+    /// paysage (étape 6), posés avant tout trait neuf, puis état rechargé depuis
+    /// un fichier `.aether` s'il y en a un. Les calques rechargés (`load`) portent
+    /// leurs propres surcharges sauvegardées et n'en héritent pas.
+    convenience init(context: SceneContext, restored: RestoredCanvasState?) {
+        self.init()
+        applySceneDefaults(context.cloudParameters)
+        if let restored {
+            load(
+                layers: restored.layers, viewYaw: restored.viewYaw, viewPitch: restored.viewPitch,
+                brushRadius: restored.brushRadius, brushSoftness: restored.brushSoftness)
+        }
     }
 }

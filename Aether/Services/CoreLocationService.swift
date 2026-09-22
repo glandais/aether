@@ -12,17 +12,19 @@ enum LocationError: Error {
 /// délégué vivent sur le thread principal.
 @MainActor
 final class CoreLocationService: NSObject, LocationService {
-    private let manager = CLLocationManager()
-    private var authContinuation: CheckedContinuation<CLAuthorizationStatus, Never>?
-    private var locationContinuation: CheckedContinuation<GeoCoordinate, Error>?
-
-    override init() {
-        super.init()
+    /// Créé au premier usage seulement : le service peut être instancié souvent
+    /// (valeur par défaut d'un `@State`, réévaluée à chaque init de vue puis
+    /// jetée) alors qu'on ne demande la position que rarement.
+    private lazy var manager: CLLocationManager = {
+        let manager = CLLocationManager()
         manager.delegate = self
         // Le kilomètre suffit largement pour orienter le ciel (le Soleil ne
         // bouge pas à l'échelle d'une ville) et accélère la prise de point.
         manager.desiredAccuracy = kCLLocationAccuracyKilometer
-    }
+        return manager
+    }()
+    private var authContinuation: CheckedContinuation<CLAuthorizationStatus, Never>?
+    private var locationContinuation: CheckedContinuation<GeoCoordinate, Error>?
 
     func currentCoordinate() async throws -> GeoCoordinate {
         let status = await authorize()
