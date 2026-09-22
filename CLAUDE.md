@@ -148,7 +148,7 @@ CSS aux emplacements `<!-- SCREENSHOT SLOT: … -->` de `index.html`.
 | Couche | Rôle | Dépend de |
 |---|---|---|
 | `Aether/App/` | entry point SwiftUI, navigation racine | Features |
-| `Aether/Features/` | modules SwiftUI par feature (Canvas, Gallery, Settings) | Domain, Services |
+| `Aether/Features/` | modules SwiftUI par feature (Canvas, Gallery, About, Settings) | Domain, Services |
 | `Aether/Rendering/` | pipeline Metal, shaders, atlas de couverture / bruit 3D | Domain **uniquement** |
 | `Aether/Domain/` | modèles purs (`Scene`, `CloudLayer`/`CloudGenus`, `BrushStroke`, `WeatherSnapshot`, `CelestialPosition`) | **rien** |
 | `Aether/Services/` | `AstroService`, `LocationService` (protocoles + impl) | Domain |

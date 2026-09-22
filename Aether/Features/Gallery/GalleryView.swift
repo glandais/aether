@@ -9,6 +9,8 @@ struct GalleryView: View {
     var onSelect: (SceneContext, RestoredCanvasState?) -> Void
 
     @State private var showImporter = false
+    /// Feuille « À propos » (liens site, support, App Store…).
+    @State private var showAbout = false
     /// Échec d'ouverture présenté à l'utilisateur (`nil` = pas d'alerte). Distingue
     /// le fichier illisible du fichier d'une version antérieure d'Aether.
     @State private var openError: OpenError?
@@ -47,6 +49,15 @@ struct GalleryView: View {
             }
             .navigationTitle("Aether")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showAbout = true
+                    } label: {
+                        Label(
+                            String(localized: "about.title", table: "Aether"),
+                            systemImage: "info.circle")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showImporter = true
@@ -56,6 +67,9 @@ struct GalleryView: View {
                             systemImage: "folder")
                     }
                 }
+            }
+            .sheet(isPresented: $showAbout) {
+                AboutView()
             }
             .fileImporter(
                 isPresented: $showImporter, allowedContentTypes: [.aetherScene]

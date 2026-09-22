@@ -29,7 +29,9 @@ Grille adaptive (colonnes ≥ 150 pt, `LazyVGrid`) de paysages curés. Chaque vi
 | Heure bleue | Reykjavik | 22 h 30 | Couvert |
 | Plein midi | Sydney | 02 h 00 | Partiellement nuageux |
 
-**Barre de navigation :** titre « Aether » + bouton dossier (icône `folder`) pour importer un fichier `.aether`.
+**Barre de navigation :** titre « Aether » + bouton dossier (icône `folder`) pour importer un fichier `.aether` ; à gauche, bouton discret « À propos » (icône `info.circle`).
+
+**À propos (`AboutView`, feuille) :** liens Site web, Support, Politique de confidentialité, Code source sur GitHub, Noter sur l'App Store (`?action=write-review`), Autres apps du développeur ; version + build en pied de liste. URLs constantes dans `AppLinks`. Ouvrir un lien passe la main à Safari / l'App Store (aucune requête de l'app). Aucun lien de don dans l'app (App Review 3.1.1).
 
 **Import :** `.fileImporter` limité au type `io.github.glandais.aether.scene`. Succès → ouvre le canvas avec l'état restauré. Échec → alerte localisée.
 

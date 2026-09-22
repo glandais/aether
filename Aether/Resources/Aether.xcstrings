@@ -1,6 +1,132 @@
 {
   "sourceLanguage" : "fr",
   "strings" : {
+    "about.moreApps" : {
+      "comment" : "Lien vers la page développeur de l'App Store.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "More Apps by the Developer"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autres apps du développeur"
+          }
+        }
+      }
+    },
+    "about.privacy" : {
+      "comment" : "Lien vers la politique de confidentialité.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Privacy Policy"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Politique de confidentialité"
+          }
+        }
+      }
+    },
+    "about.rate" : {
+      "comment" : "Lien pour noter l'app sur l'App Store.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rate on the App Store"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Noter sur l'App Store"
+          }
+        }
+      }
+    },
+    "about.source" : {
+      "comment" : "Lien vers le code source sur GitHub.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Source Code on GitHub"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Code source sur GitHub"
+          }
+        }
+      }
+    },
+    "about.support" : {
+      "comment" : "Lien vers la page de support.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Support"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Support"
+          }
+        }
+      }
+    },
+    "about.title" : {
+      "comment" : "Titre de la feuille « À propos » et libellé du bouton qui l'ouvre (galerie).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "À propos"
+          }
+        }
+      }
+    },
+    "about.website" : {
+      "comment" : "Lien vers le site web de l'app.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Website"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Site web"
+          }
+        }
+      }
+    },
     "action.back" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -68,6 +194,24 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Valider"
+          }
+        }
+      }
+    },
+    "action.done" : {
+      "comment" : "Bouton fermant la feuille « À propos ».",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OK"
           }
         }
       }

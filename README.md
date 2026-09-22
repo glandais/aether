@@ -8,6 +8,13 @@ position réelle du soleil et de la lune à l'endroit et à l'heure choisis.
 
 > *Aether* — du grec αἰθήρ, le ciel lumineux, cinquième élément.
 
+**Liens** — [App Store](https://apps.apple.com/app/id6773940359) ·
+[Site](https://glandais.github.io/aether/) ·
+[Support](https://glandais.github.io/aether/support/) ·
+[Confidentialité](https://glandais.github.io/aether/privacy/) ·
+[Code source](https://github.com/glandais/aether) ·
+[Ko-fi](https://ko-fi.com/gabylandais)
+
 Expérience visée : **contemplative, lente, satisfaisante**. Pas d'éditeur 3D —
 une poignée de gestes et de sliders.
 
