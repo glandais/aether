@@ -516,21 +516,9 @@ struct CanvasView: View {
         }
     }
 
-    /// Formateur « HH:mm » 24 h réutilisé (le fuseau est réglé à chaque appel —
-    /// sûr car la vue est isolée au main actor). Éviter d'allouer un
-    /// `DateFormatter` à chaque `body` (jusqu'à ~30×/s en défilement).
-    private static let timeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "HH:mm"
-        return formatter
-    }()
-
-    /// Heure locale « HH:mm » affichée par la barre temporelle.
+    /// Heure locale « HH:mm » (24 h, locale-safe) affichée par la barre temporelle.
     private func timeLabel(for date: Date) -> String {
-        let formatter = Self.timeFormatter
-        formatter.timeZone = effectiveTimeZone
-        return formatter.string(from: date)
+        ClockTime.format(date, timeZone: effectiveTimeZone)
     }
 }
 

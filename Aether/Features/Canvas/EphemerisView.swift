@@ -79,22 +79,10 @@ struct EphemerisView: View {
         }
     }
 
-    /// Formateur « HH:mm » 24 h réutilisé (le fuseau est réglé à chaque appel —
-    /// sûr car cantonné au main thread). Éviter d'allouer un `DateFormatter` par
-    /// ligne d'éphéméride.
-    private static let timeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "HH:mm"
-        return formatter
-    }()
-
-    /// Heure locale « HH:mm », ou « — » si l'astre ne franchit pas l'horizon ce jour.
+    /// Heure locale « HH:mm » (24 h), ou « — » si l'astre ne franchit pas l'horizon ce jour.
     private func time(_ date: Date?) -> String {
         guard let date else { return "—" }
-        let formatter = Self.timeFormatter
-        formatter.timeZone = timeZone
-        return formatter.string(from: date)
+        return ClockTime.format(date, timeZone: timeZone)
     }
 
     private var phaseName: String {
